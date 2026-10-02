@@ -36,6 +36,14 @@ jobs:
       - name: Capacitor sync android
         run: npx cap sync android
 
+      - name: Apply Android manifest fixes (after cap sync)
+        run: |
+          MP=android/app/src/main/AndroidManifest.xml
+          if ! grep -q windowOptOutEdgeToEdgeEnforcement "$MP"; then
+            sed -i 's|<application|    <application\n        android:windowOptOutEdgeToEdgeEnforcement="true"|' "$MP"
+          fi
+          grep -c windowOptOutEdgeToEdgeEnforcement "$MP"
+
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
