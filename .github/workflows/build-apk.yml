@@ -5,11 +5,16 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -54,8 +59,46 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Sign APK
+        working-directory: android
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -f 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/aligned.apk
+          "$BT/apksigner" sign \
+            --ks keystore/chatbox-mod.keystore \
+            --ks-key-alias chatbox-mod \
+            --ks-pass pass:chatbox123 \
+            --key-pass pass:chatbox123 \
+            --out app/build/outputs/apk/release/chatbox-mod.apk \
+            app/build/outputs/apk/release/aligned.apk
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/release/chatbox-mod.apk
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            LOG=$(git log --oneline --no-merges "$PREV..HEAD" | sed 's/^/- /')
+          else
+            LOG=$(git log --oneline --no-merges | sed 's/^/- /')
+          fi
+          {
+            echo "body<<EOF"
+            echo "$LOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: chatbox-mod-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          tag_name: v${{ github.run_number }}
+          name: Chatbox Mod v${{ github.run_number }}
+          body: |
+            ## 本版改动
+            ${{ steps.changelog.outputs.body }}
+
+            ## 安装说明
+            - APK 已签名（chatbox-mod.keystore），**可直接安装**
+            - 与之前版本同签名，**可覆盖安装**（数据保留）
+            - 包名：xyz.chatboxapp.chatbox
+          files: android/app/build/outputs/apk/release/chatbox-mod.apk
