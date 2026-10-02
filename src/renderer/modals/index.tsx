@@ -6,6 +6,7 @@ import ArtifactPreview from './ArtifactPreview'
 import ClearSessionList from './ClearSessionList'
 import ConfirmModal from './ConfirmModal'
 import ContentViewer from './ContentViewer'
+import CreativeLoadSheet from './CreativeLoadSheet'
 import ExportChat from './ExportChat'
 import FileParseError from './FileParseError'
 import JsonViewer from './JsonViewer'
@@ -22,6 +23,7 @@ NiceModal.register('agent-mode-reward-claim-success', AgentModeRewardClaimSucces
 NiceModal.register('file-parse-error', FileParseError)
 NiceModal.register('content-viewer', ContentViewer)
 NiceModal.register('session-settings', SessionSettings)
+NiceModal.register('creative-load-sheet', CreativeLoadSheet)
 NiceModal.register('app-store-rating', AppStoreRating)
 NiceModal.register('artifact-preview', ArtifactPreview)
 NiceModal.register('clear-session-list', ClearSessionList)

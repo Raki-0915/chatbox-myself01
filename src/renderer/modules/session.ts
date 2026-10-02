@@ -14,6 +14,8 @@ const log = getLogger('mod-session')
 export interface ModBinding {
   worldBookIds: string[]
   characterCardIds: string[]
+  /** 对话级自动更新开关（未设置时回退全局 modSettings.autoUpdateEnabled） */
+  autoUpdateEnabled?: boolean
 }
 
 const EMPTY: ModBinding = { worldBookIds: [], characterCardIds: [] }
@@ -25,6 +27,7 @@ export async function getBinding(sessionId: string): Promise<ModBinding> {
     return {
       worldBookIds: Array.isArray(settings.worldBookIds) ? settings.worldBookIds : [],
       characterCardIds: Array.isArray(settings.characterCardIds) ? settings.characterCardIds : [],
+      autoUpdateEnabled: settings.autoUpdateEnabled,
     }
   } catch (e) {
     log.warn(`getBinding(${sessionId}) failed`, e)
@@ -42,6 +45,7 @@ export async function setBinding(sessionId: string, binding: ModBinding): Promis
         ...session.settings,
         worldBookIds: binding.worldBookIds ?? [],
         characterCardIds: binding.characterCardIds ?? [],
+        autoUpdateEnabled: binding.autoUpdateEnabled,
       },
     }
   })

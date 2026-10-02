@@ -230,6 +230,8 @@ export const SessionSettingsSchema = GlobalSessionSettingsSchema.extend({
   // [Chatbox Mod] 世界书/人物卡装载：会话级注入哪些条目（id 数组）
   worldBookIds: z.array(z.string()).optional().catch(undefined),
   characterCardIds: z.array(z.string()).optional().catch(undefined),
+  // [Chatbox Mod] 对话级自动更新开关（缺省时回退全局 modSettings.autoUpdateEnabled）
+  autoUpdateEnabled: z.boolean().optional().catch(undefined),
 })
 
 const UnifiedTokenUsageDetailSchema = z.object({

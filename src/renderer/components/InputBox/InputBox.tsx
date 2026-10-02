@@ -126,6 +126,7 @@ import { MessageInputField, type MessageInputFieldRef } from './MessageInputFiel
 import PendingActionBar from './PendingActionBar'
 import { cleanupFile, markFileProcessing, onFileProcessed, storeFilePromise } from './preprocessState'
 import { QueuedMessagesBar } from './QueuedMessagesBar'
+import ModLoadIndicator from '@/components/layout/ModLoadIndicator'
 import ReasoningControlButton from './ReasoningControlButton'
 import { mergeSessionAttachmentStatesIntoFiles, shouldRefetchSessionAttachmentStates } from './sessionAttachmentState'
 import { getTrailingSkillCommand, insertSkillCommandText } from './skillCommand'
@@ -1514,6 +1515,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
           )}
           {currentSession && !isNewSession && <WebSearchUnavailableBanner session={currentSession} />}
           {currentSessionId && !isNewSession && <QueuedMessagesBar sessionId={currentSessionId} />}
+          {currentSessionId && !isNewSession && <ModLoadIndicator sessionId={currentSessionId} />}
           {currentSession && !isNewSession && (
             <ErrorBoundary name="pending-action-bar">
               <PendingActionBar session={currentSession} />

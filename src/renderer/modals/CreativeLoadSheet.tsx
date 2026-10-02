@@ -1,0 +1,270 @@
+/**
+ * Chatbox Mod —— 创作设置上拉板（底部弹层）
+ *
+ * 入口：对话页「对话设置」→「创作设置」
+ * 能力：
+ *  1. 装载世界书/人物卡到当前对话（仅「设置页-创作资料」中已启用的条目可选）
+ *  2. 自动更新开关（对话结束后自动分析剧情进展，更新已装载条目）
+ *
+ * 数据层全部复用现有模块：
+ *  - worldBooksAtom / characterCardsAtom（enabled 过滤 -> 可用库）
+ *  - session.ts getBinding / setBinding（会话级装载，存 session.settings.worldBookIds/characterCardIds）
+ *  - modSettingsAtom.autoUpdateEnabled（自动更新开关）
+ */
+import NiceModal, { useModal } from '@ebay/nice-modal-react'
+import { Box, Button, Checkbox, Divider, Flex, Group, Modal, ScrollArea, Stack, Switch, Text, UnstyledButton } from '@mantine/core'
+import { IconBook2, IconUsers } from '@tabler/icons-react'
+import { useAtomValue } from 'jotai'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
+import { characterCardsAtom, modSettingsAtom, worldBooksAtom } from '@/modules/store'
+import { getBinding, setBinding } from '@/modules/session'
+
+interface SheetEntry {
+  id: string
+  name: string
+  sub: string
+}
+
+function SheetSection(props: {
+  icon: React.ReactNode
+  title: string
+  enabledEntries: SheetEntry[]
+  disabledEntries: SheetEntry[]
+  selected: string[]
+  onToggle: (id: string) => void
+  onGoEnable: () => void
+  accent: string
+}) {
+  const { icon, title, enabledEntries, disabledEntries, selected, onToggle, onGoEnable, accent } = props
+  return (
+    <Box>
+      <Group gap={6} mb={6}>
+        {icon}
+        <Text fw={700} size="sm">
+          {title}
+        </Text>
+        <Text size="xs" c="dimmed">
+          已装载 {selected.length}/{enabledEntries.length + disabledEntries.length}
+        </Text>
+      </Group>
+      <Stack gap={6}>
+        {enabledEntries.length === 0 && disabledEntries.length === 0 ? (
+          <Text size="xs" c="dimmed" py={6}>
+            暂无条目，请先在「设置-创作资料」中新建。
+          </Text>
+        ) : null}
+        {enabledEntries.map((e) => (
+          <Flex
+            key={e.id}
+            align="center"
+            gap="sm"
+            px="sm"
+            py={8}
+            style={{ border: selected.includes(e.id) ? `1.5px solid ${accent}` : '1px solid var(--chatbox-border-primary, #e5e7eb)', borderRadius: 10, background: selected.includes(e.id) ? 'var(--chatbox-background-brand-secondary, #f0fdf4)' : 'transparent' }}
+          >
+            <Checkbox
+              checked={selected.includes(e.id)}
+              onChange={() => onToggle(e.id)}
+              color="chatbox-brand"
+              size="sm"
+              aria-label={e.name}
+            />
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <Text size="sm" fw={600} lineClamp={1}>
+                {e.name}
+              </Text>
+              <Text size="xs" c="dimmed" lineClamp={1}>
+                {e.sub}
+              </Text>
+            </Box>
+            <Text size="xs" c="chatbox-success" style={{ flex: '0 0 auto' }}>
+              已启用
+            </Text>
+          </Flex>
+        ))}
+        {disabledEntries.map((e) => (
+          <Flex
+            key={e.id}
+            align="center"
+            gap="sm"
+            px="sm"
+            py={8}
+            style={{ border: '1px solid var(--chatbox-border-primary, #e5e7eb)', borderRadius: 10, opacity: 0.6 }}
+          >
+            <Checkbox disabled aria-label={e.name} size="sm" />
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <Text size="sm" c="dimmed" lineClamp={1}>
+                {e.name}
+              </Text>
+              <Text size="xs" c="dimmed" lineClamp={1}>
+                {e.sub} · 未启用
+              </Text>
+            </Box>
+            <UnstyledButton
+              onClick={onGoEnable}
+              style={{ flex: '0 0 auto', color: 'var(--chatbox-brand-color, #2563eb)', fontSize: 12, fontWeight: 600, padding: '4px 8px' }}
+            >
+              去设置页启用
+            </UnstyledButton>
+          </Flex>
+        ))}
+      </Stack>
+    </Box>
+  )
+}
+
+const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }) => {
+  const modal = useModal()
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const wbAll = useAtomValue(worldBooksAtom)
+  const ccAll = useAtomValue(characterCardsAtom)
+  const modSettings = useAtomValue(modSettingsAtom)
+
+  const [wbSel, setWbSel] = useState<string[]>([])
+  const [ccSel, setCcSel] = useState<string[]>([])
+  const [auto, setAuto] = useState<boolean>(modSettings.autoUpdateEnabled)
+
+  // 打开时读取当前会话的装载状态（自动更新为对话级：会话有设置用会话值，否则回退全局）
+  useEffect(() => {
+    let alive = true
+    void getBinding(sessionId).then((b) => {
+      if (!alive) return
+      setWbSel(b.worldBookIds)
+      setCcSel(b.characterCardIds)
+      if (b.autoUpdateEnabled !== undefined) setAuto(b.autoUpdateEnabled)
+    })
+    return () => {
+      alive = false
+    }
+  }, [sessionId])
+
+  const wbEnabled = useMemo(() => wbAll.filter((w) => w.enabled !== false), [wbAll])
+  const wbDisabled = useMemo(() => wbAll.filter((w) => w.enabled === false), [wbAll])
+  const ccEnabled = useMemo(() => ccAll.filter((c) => c.enabled !== false), [ccAll])
+  const ccDisabled = useMemo(() => ccAll.filter((c) => c.enabled === false), [ccAll])
+
+  const total = wbSel.length + ccSel.length
+
+  const toggleWb = (id: string) =>
+    setWbSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+  const toggleCc = (id: string) =>
+    setCcSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+
+  const save = async () => {
+    // 对话级保存：装载 + 自动更新开关写入当前会话 settings
+    await setBinding(sessionId, { worldBookIds: wbSel, characterCardIds: ccSel, autoUpdateEnabled: auto })
+    modal.resolve(true)
+    modal.remove()
+  }
+
+  const goEnable = () => {
+    modal.remove()
+    // to 为手工补齐的扩展路由（creative），不参与 TanStack 生成类型，需断言
+    void navigate({ to: '/settings/creative' as any })
+  }
+
+  return (
+    <Modal
+      opened
+      onClose={() => modal.remove()}
+      withCloseButton={false}
+      centered={false}
+      padding={0}
+      radius="lg"
+      styles={{
+        content: {
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          top: 'auto',
+          width: '100%',
+          maxHeight: '88vh',
+          borderRadius: '16px 16px 0 0',
+          margin: 0,
+        },
+        body: { padding: 0 },
+      }}
+      transitionProps={{ transition: 'slide-up', duration: 220 }}
+    >
+      <Box>
+        {/* 头部 */}
+        <Box px="md" pt="sm" pb="xs" style={{ borderBottom: '1px solid var(--chatbox-border-primary, #f0f1f3)' }}>
+          <Flex justify="space-between" align="center">
+            <Text fw={700} size="md">
+              📖 创作设置
+            </Text>
+            <UnstyledButton onClick={() => modal.remove()} aria-label="close" style={{ fontSize: 18, color: '#9ca3af', padding: 4 }}>
+              ✕
+            </UnstyledButton>
+          </Flex>
+          <Text size="xs" c="dimmed" mt={4}>
+            仅显示「设置页已启用」的条目；勾选后装载到<b>当前对话</b>，其他对话不受影响。
+          </Text>
+        </Box>
+
+        {/* 内容 */}
+        <ScrollArea.Autosize mah="62vh" type="auto" offsetScrollbars>
+          <Stack px="md" py="sm" gap="md">
+            <SheetSection
+              icon={<IconBook2 size={15} color="var(--chatbox-brand-color, #2563eb)" />}
+              title="世界书"
+              enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}` }))}
+              disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发' }))}
+              selected={wbSel}
+              onToggle={toggleWb}
+              onGoEnable={goEnable}
+              accent="#059669"
+            />
+            <Divider />
+            <SheetSection
+              icon={<IconUsers size={15} color="var(--chatbox-brand-color, #7c3aed)" />}
+              title="人物卡"
+              enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}` }))}
+              disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业' }))}
+              selected={ccSel}
+              onToggle={toggleCc}
+              onGoEnable={goEnable}
+              accent="#059669"
+            />
+            <Divider />
+            {/* 自动更新 */}
+            <Group justify="space-between" align="flex-start" px="xs" py="xs">
+              <Box style={{ flex: 1 }}>
+                <Text fw={600} size="sm">
+                  ⚡ 自动更新
+                </Text>
+                <Text size="xs" c="dimmed" mt={2}>
+                  对话结束后自动分析剧情进展，更新已装载的世界书与人物卡内容
+                </Text>
+              </Box>
+              <Switch
+                checked={auto}
+                onChange={(e) => setAuto(e.currentTarget.checked)}
+                size="md"
+                color="chatbox-brand"
+              />
+            </Group>
+          </Stack>
+        </ScrollArea.Autosize>
+
+        {/* 底部操作 */}
+        <Box px="md" py="sm" style={{ borderTop: '1px solid var(--chatbox-border-primary, #f0f1f3)' }}>
+          <Group gap="sm">
+            <Button variant="default" style={{ flex: 1 }} onClick={() => modal.remove()}>
+              {t('Cancel')}
+            </Button>
+            <Button color="chatbox-brand" style={{ flex: 2 }} onClick={() => void save()}>
+              保存装载（{total}）
+            </Button>
+          </Group>
+        </Box>
+      </Box>
+    </Modal>
+  )
+})
+
+export default CreativeLoadSheet

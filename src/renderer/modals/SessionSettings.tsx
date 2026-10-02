@@ -1,6 +1,6 @@
 import { isActionAvailableInMode, resolveSessionMode } from '@chatbox/core/session/mode-policy'
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
-import { ActionIcon, Box, Button, FileButton, Flex, Input, Stack, Switch, Text, Textarea } from '@mantine/core'
+import { ActionIcon, Box, Button, FileButton, Flex, Input, Stack, Switch, Text, Textarea, UnstyledButton } from '@mantine/core'
 import { TestId } from '@shared/automation/testids'
 import { chatSessionSettings } from '@shared/defaults'
 import { createMessage, isChatSession, ModelProviderEnum, type Session } from '@shared/types'
@@ -363,6 +363,33 @@ const SessionSettingsModal = NiceModal.create(
             </Stack>
           </Stack>
         </div>
+
+        {/* Chatbox Mod: 创作设置入口 */}
+        <Box px="lg" pb="sm">
+          <UnstyledButton
+            onClick={() => {
+              if (!editingData?.id) return
+              NiceModal.show('creative-load-sheet', { sessionId: editingData.id })
+            }}
+            style={{
+              width: '100%',
+              background: 'var(--chatbox-background-brand-secondary, #eff6ff)',
+              border: '1px solid var(--chatbox-brand-color, #bfdbfe)',
+              color: 'var(--chatbox-brand-color, #1e40af)',
+              borderRadius: 10,
+              padding: '10px 0',
+              textAlign: 'center',
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            📖 创作设置
+          </UnstyledButton>
+          <Text size="xs" c="dimmed" style={{ textAlign: 'center', marginTop: 6 }}>
+            装载世界书/人物卡到本对话 · 自动更新开关
+          </Text>
+        </Box>
 
         <AdaptiveModal.Actions>
           <AdaptiveModal.CloseButton onClick={onCancel} />
