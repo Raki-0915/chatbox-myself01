@@ -38,6 +38,12 @@ const ITEMS = [
     icon: <IconSparkles className="w-full h-full" />,
   },
   {
+    key: 'creative',
+    label: '创作资料',
+    noTranslate: true,
+    icon: <IconBook2 className="w-full h-full" />,
+  },
+  {
     key: 'provider',
     label: 'Model Provider',
     icon: <IconCategory className="w-full h-full" />,
@@ -114,12 +120,6 @@ const ITEMS = [
     key: 'general',
     label: 'General Settings',
     icon: <IconAdjustmentsHorizontal className="w-full h-full" />,
-  },
-  {
-    key: 'creative',
-    label: '创作资料',
-    noTranslate: true,
-    icon: <IconBook2 className="w-full h-full" />,
   },
   {
     key: 'mod',
@@ -230,9 +230,7 @@ export function SettingsRoot() {
                 {item.key === 'chatbox-ai' && isChatboxAIActivated && (
                   <Indicator size={8} color="chatbox-success" className="ml-auto" />
                 )}
-                {isSmallScreen && (
-                  <ScalableIcon icon={IconChevronRight} size={20} className="!text-chatbox-tint-tertiary" />
-                )}
+                <ScalableIcon icon={IconChevronRight} size={20} className="!text-chatbox-tint-tertiary" />
               </Flex>
 
               {isSmallScreen && <Divider />}
