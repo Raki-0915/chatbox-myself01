@@ -87,7 +87,7 @@ export function ChatboxModPage() {
 
 /* ======================== 世界书 ======================== */
 
-function WorldBooksTab() {
+export function WorldBooksTab() {
   const items = useAtomValue(worldBooksAtom)
   const folders = useAtomValue(foldersAtom)
   const [editing, setEditing] = useState<WorldBookEntry | null>(null)
@@ -228,7 +228,7 @@ async function removeFolderById(id: string) {
 
 /* ======================== 人物卡 ======================== */
 
-function CharactersTab() {
+export function CharactersTab() {
   const items = useAtomValue(characterCardsAtom)
   const [editing, setEditing] = useState<CharacterCard | null>(null)
   const [opened, { open, close }] = useDisclosure(false)

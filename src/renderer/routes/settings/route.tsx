@@ -116,6 +116,12 @@ const ITEMS = [
     icon: <IconAdjustmentsHorizontal className="w-full h-full" />,
   },
   {
+    key: 'creative',
+    label: '创作资料',
+    noTranslate: true,
+    icon: <IconBook2 className="w-full h-full" />,
+  },
+  {
     key: 'mod',
     label: 'Chatbox Mod',
     noTranslate: true,
