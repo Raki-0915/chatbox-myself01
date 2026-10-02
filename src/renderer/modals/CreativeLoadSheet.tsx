@@ -13,7 +13,7 @@
  */
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
 import { Box, Button, Checkbox, Divider, Flex, Group, Modal, ScrollArea, Stack, Switch, Text, UnstyledButton } from '@mantine/core'
-import { IconBook2, IconUsers } from '@tabler/icons-react'
+import { IconBook2, IconBolt, IconUsers } from '@tabler/icons-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
@@ -194,10 +194,13 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
         {/* 头部 */}
         <Box px="md" pt="sm" pb="xs" style={{ borderBottom: '1px solid var(--chatbox-border-primary, #f0f1f3)' }}>
           <Flex justify="space-between" align="center">
-            <Text fw={700} size="md">
-              📖 创作设置
-            </Text>
-            <UnstyledButton onClick={() => modal.remove()} aria-label="close" style={{ fontSize: 18, color: '#9ca3af', padding: 4 }}>
+            <Group gap={6}>
+              <IconBook2 size={17} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />
+              <Text fw={700} size="md">
+                创作设置
+              </Text>
+            </Group>
+            <UnstyledButton onClick={() => modal.remove()} aria-label="close" style={{ fontSize: 18, color: 'var(--chatbox-text-secondary, #9ca3af)', padding: 4 }}>
               ✕
             </UnstyledButton>
           </Flex>
@@ -210,7 +213,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
         <ScrollArea.Autosize mah="62vh" type="auto" offsetScrollbars>
           <Stack px="md" py="sm" gap="md">
             <SheetSection
-              icon={<IconBook2 size={15} color="var(--chatbox-brand-color, #2563eb)" />}
+              icon={<IconBook2 size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
               title="世界书"
               enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}` }))}
               disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发' }))}
@@ -221,7 +224,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
             />
             <Divider />
             <SheetSection
-              icon={<IconUsers size={15} color="var(--chatbox-brand-color, #7c3aed)" />}
+              icon={<IconUsers size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
               title="人物卡"
               enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}` }))}
               disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业' }))}
@@ -234,9 +237,12 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
             {/* 自动更新 */}
             <Group justify="space-between" align="flex-start" px="xs" py="xs">
               <Box style={{ flex: 1 }}>
-                <Text fw={600} size="sm">
-                  ⚡ 自动更新
-                </Text>
+                <Group gap={6}>
+                  <IconBolt size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />
+                  <Text fw={600} size="sm">
+                    自动更新
+                  </Text>
+                </Group>
                 <Text size="xs" c="dimmed" mt={2}>
                   对话结束后自动分析剧情进展，更新已装载的世界书与人物卡内容
                 </Text>

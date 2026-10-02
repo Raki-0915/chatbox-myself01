@@ -1,6 +1,6 @@
 import { Menu, UnstyledButton } from '@mantine/core'
 import { TestId } from '@shared/automation/testids'
-import { IconAdjustmentsHorizontal, IconPlus, IconSettings } from '@tabler/icons-react'
+import { IconAdjustmentsHorizontal, IconBook2, IconPlus, IconSettings } from '@tabler/icons-react'
 import type { FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScalableIcon } from '../common/ScalableIcon'
@@ -11,6 +11,8 @@ type ComposerSettingsMenuProps = {
   threadActionPending?: boolean
   onStartNewThread?: () => void
   onClickSessionSettings?: () => void
+  /** Chatbox Mod: 打开创作设置（会话级装载 + 自动更新） */
+  onClickCreativeSettings?: () => void
 }
 
 export const ComposerSettingsMenu: FC<ComposerSettingsMenuProps> = ({
@@ -19,6 +21,7 @@ export const ComposerSettingsMenu: FC<ComposerSettingsMenuProps> = ({
   threadActionPending,
   onStartNewThread,
   onClickSessionSettings,
+  onClickCreativeSettings,
 }) => {
   const { t } = useTranslation()
 
@@ -61,6 +64,14 @@ export const ComposerSettingsMenu: FC<ComposerSettingsMenuProps> = ({
           onClick={onClickSessionSettings}
         >
           {t('Conversation Settings')}
+        </Menu.Item>
+        {/* Chatbox Mod: 创作设置（会话级装载世界书/人物卡 + 自动更新） */}
+        <Menu.Item
+          leftSection={<ScalableIcon icon={IconBook2} size={16} />}
+          onClick={onClickCreativeSettings}
+          disabled={!onClickCreativeSettings}
+        >
+          创作设置
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>

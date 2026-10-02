@@ -5,7 +5,7 @@ import { TestId } from '@shared/automation/testids'
 import { chatSessionSettings } from '@shared/defaults'
 import { createMessage, isChatSession, ModelProviderEnum, type Session } from '@shared/types'
 import { MAX_TOOL_CALLS_BEFORE_CONFIRMATION, shouldPauseOnToolCallLimit } from '@shared/utils/tool-call-limit-pause'
-import { IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconBook2, IconTrash, IconUpload } from '@tabler/icons-react'
 import { pick } from 'lodash'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -384,7 +384,10 @@ const SessionSettingsModal = NiceModal.create(
               cursor: 'pointer',
             }}
           >
-            📖 创作设置
+            <Flex justify="center" align="center" gap={6}>
+              <IconBook2 size={15} style={{ color: 'var(--chatbox-brand-color, #1e40af)' }} />
+              <span>创作设置</span>
+            </Flex>
           </UnstyledButton>
           <Text size="xs" c="dimmed" style={{ textAlign: 'center', marginTop: 6 }}>
             装载世界书/人物卡到本对话 · 自动更新开关

@@ -1992,6 +1992,11 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                     onStartNewThread={startNewThread}
                     threadActionPending={threadActionPending}
                     onClickSessionSettings={onClickSessionSettings}
+                    onClickCreativeSettings={
+                      currentSessionId && currentSessionId !== 'new'
+                        ? () => NiceModal.show('creative-load-sheet', { sessionId: currentSessionId })
+                        : undefined
+                    }
                   />
                 )}
               </Flex>
