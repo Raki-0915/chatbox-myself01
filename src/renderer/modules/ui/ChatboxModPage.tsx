@@ -11,6 +11,7 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   Divider,
   Group,
   Modal,
@@ -23,13 +24,15 @@ import {
   Textarea,
   TextInput,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBook2, IconBookDownload, IconBookUpload, IconHistory, IconRefresh, IconRobot, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
+import { IconBook2, IconBookDownload, IconBookUpload, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import Page from '@/components/layout/Page'
+import platform from '@/platform'
 import { currentSessionIdAtom } from '@/stores/atoms/sessionAtoms'
 import { useSessionSettings } from '@/stores/session/session-settings'
 import {
@@ -42,10 +45,13 @@ import {
   modBackupsAtom,
   modLogAtom,
   modSettingsAtom,
+  moveItemsToFolder,
   removeCharacterCard,
+  removeItems,
   removeWorldBook,
   restoreCharacterCardVersion,
   restoreModBackup,
+  setItemsEnabled,
   toggleCharacterCard,
   toggleWorldBook,
   updateModSettings,
@@ -85,6 +91,59 @@ export function ChatboxModPage() {
   )
 }
 
+/* ======================== 多选与导入导出（世界书/人物卡共用） ======================== */
+
+/** 多选状态管理 */
+function useBatchSelect<T extends { id: string }>(items: T[]) {
+  const [mode, setMode] = useState(false)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const toggle = (id: string) =>
+    setSel((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  const clear = () => setSel(new Set())
+  // 列表变化时清理失效选中
+  useEffect(() => {
+    const valid = new Set(items.map((x) => x.id))
+    setSel((s) => {
+      const keep = new Set([...s].filter((id) => valid.has(id)))
+      return keep.size === s.size ? s : keep
+    })
+  }, [items])
+  return { mode, setMode, sel, setSel, toggle, clear }
+}
+
+/** 导出条目列表为 JSON 文件（复用官方 exporter） */
+async function exportEntriesJson(filename: string, entries: unknown[]): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' })
+    await platform.exporter.exportBlob(filename, blob, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+/** 读取导入文件并解析为数组 */
+function readJsonArrayFile(file: File): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(String(r.result))
+        resolve(Array.isArray(parsed) ? parsed : [])
+      } catch (e) {
+        reject(e)
+      }
+    }
+    r.onerror = () => reject(new Error('文件读取失败'))
+    r.readAsText(file, 'utf8')
+  })
+}
+
 /* ======================== 世界书 ======================== */
 
 export function WorldBooksTab() {
@@ -92,6 +151,9 @@ export function WorldBooksTab() {
   const folders = useAtomValue(foldersAtom)
   const [editing, setEditing] = useState<WorldBookEntry | null>(null)
   const [opened, { open, close }] = useDisclosure(false)
+  const [msg, setMsg] = useState('')
+  const [importing, setImporting] = useState(false)
+  const bs = useBatchSelect(items)
   const wbFolders = folders.filter((f) => f.kind === 'wb')
 
   const openNew = () => {
@@ -108,19 +170,95 @@ export function WorldBooksTab() {
     close()
   }
 
+  const doExport = async () => {
+    const r = await exportEntriesJson('chatbox-mod-worldbooks.json', items)
+    setMsg(r.ok ? `已导出 ${items.length} 条世界书` : `导出失败：${r.error}`)
+  }
+
+  const doImport = async (file: File | null) => {
+    if (!file) return
+    setImporting(true)
+    try {
+      const arr = await readJsonArrayFile(file)
+      let n = 0
+      for (const raw of arr) {
+        const it = raw as Partial<WorldBookEntry>
+        if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
+        await addOrUpdateWorldBook({
+          id: typeof it.id === 'string' && it.id ? it.id : uuidv4(),
+          name: it.name.trim(),
+          content: typeof it.content === 'string' ? it.content : '',
+          keywords: Array.isArray(it.keywords) ? it.keywords.map(String) : [],
+          enabled: it.enabled !== false,
+          triggerMode: it.triggerMode === 'always' ? 'always' : 'keyword',
+          folderId: typeof it.folderId === 'string' ? it.folderId : undefined,
+          order: Number(it.order) || 0,
+          createdAt: typeof it.createdAt === 'number' ? it.createdAt : Date.now(),
+          updatedAt: Date.now(),
+        })
+        n++
+      }
+      setMsg(`导入完成：${n} 条世界书`)
+    } catch (e) {
+      setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const selectedIds = [...bs.sel]
+
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Text c="dimmed" size="sm">共 {items.length} 条世界书</Text>
-        <Group>
-          <FolderManager kind="wb" />
-          <Button size="xs" onClick={openNew}>+ 新建世界书</Button>
+      {bs.mode ? (
+        <Group justify="space-between" wrap="wrap">
+          <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 条</Text>
+          <Group gap={4} wrap="wrap">
+            <Select
+              placeholder="移动到文件夹"
+              clearable
+              size="xs"
+              data={wbFolders.map((f) => ({ value: f.id, label: f.name }))}
+              onChange={(v) => {
+                if (selectedIds.length) void moveItemsToFolder('wb', selectedIds, v ?? undefined)
+                bs.clear()
+              }}
+              style={{ minWidth: 150 }}
+            />
+            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用</Button>
+            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>停用</Button>
+            <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('wb', selectedIds); bs.clear() }}>删除</Button>
+            <Button size="xs" variant="subtle" onClick={() => { bs.setMode(false); bs.clear() }}>退出多选</Button>
+          </Group>
         </Group>
-      </Group>
+      ) : (
+        <Group justify="space-between">
+          <Text c="dimmed" size="sm">共 {items.length} 条世界书{msg ? ` · ${msg}` : ''}</Text>
+          <Group gap={4}>
+            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
+            <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
+            <Tooltip label="选择世界书 JSON 文件（导入合并）">
+              <label>
+                <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
+                <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
+              </label>
+            </Tooltip>
+            <FolderManager kind="wb" />
+            <Button size="xs" onClick={openNew}>+ 新建世界书</Button>
+          </Group>
+        </Group>
+      )}
       <Stack gap="xs">
         {items.map((w) => (
-          <Card key={w.id} withBorder padding="sm">
+          <Card
+            key={w.id}
+            withBorder
+            padding="sm"
+            style={bs.mode ? { borderColor: bs.sel.has(w.id) ? 'var(--chatbox-brand-color, #2563eb)' : undefined, cursor: 'pointer' } : undefined}
+            onClick={bs.mode ? () => bs.toggle(w.id) : undefined}
+          >
             <Group justify="space-between" wrap="nowrap">
+              {bs.mode && <Checkbox checked={bs.sel.has(w.id)} onChange={() => bs.toggle(w.id)} aria-label={w.name} size="sm" />}
               <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
                 <Group gap="xs">
                   <Text fw={600} size="sm" lineClamp={1}>{w.name}</Text>
@@ -132,11 +270,13 @@ export function WorldBooksTab() {
                 <Text size="xs" c="dimmed" lineClamp={2}>{w.content}</Text>
                 {w.keywords.length > 0 ? <Text size="xs" c="gray">{w.keywords.join('、')}</Text> : null}
               </Stack>
-              <Group gap={4} wrap="nowrap">
-                <Switch checked={w.enabled !== false} size="xs" onChange={(e) => void toggleWorldBook(w.id, e.currentTarget.checked)} />
-                <Button size="compact-xs" variant="subtle" onClick={() => openEdit(w)}>编辑</Button>
-                <Button size="compact-xs" variant="subtle" color="red" onClick={() => void removeWorldBook(w.id)}>删除</Button>
-              </Group>
+              {!bs.mode && (
+                <Group gap={4} wrap="nowrap">
+                  <Switch checked={w.enabled !== false} size="xs" onClick={(e) => e.stopPropagation()} onChange={(e) => void toggleWorldBook(w.id, e.currentTarget.checked)} />
+                  <Button size="compact-xs" variant="subtle" onClick={(e) => { e.stopPropagation(); openEdit(w) }}>编辑</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={(e) => { e.stopPropagation(); void removeWorldBook(w.id) }}>删除</Button>
+                </Group>
+              )}
             </Group>
           </Card>
         ))}
@@ -232,8 +372,12 @@ export function CharactersTab() {
   const items = useAtomValue(characterCardsAtom)
   const [editing, setEditing] = useState<CharacterCard | null>(null)
   const [opened, { open, close }] = useDisclosure(false)
+  const [msg, setMsg] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [mergeOpen, { open: openMerge, close: closeMerge }] = useDisclosure(false)
   const folders = useAtomValue(foldersAtom)
   const ccFolders = folders.filter((f) => f.kind === 'cc')
+  const bs = useBatchSelect(items)
 
   const openNew = () => {
     const card = createEmptyCharacterCard()
@@ -252,19 +396,104 @@ export function CharactersTab() {
     close()
   }
 
+  const doExport = async () => {
+    const r = await exportEntriesJson('chatbox-mod-charactercards.json', items)
+    setMsg(r.ok ? `已导出 ${items.length} 张人物卡` : `导出失败：${r.error}`)
+  }
+
+  const doImport = async (file: File | null) => {
+    if (!file) return
+    setImporting(true)
+    try {
+      const arr = await readJsonArrayFile(file)
+      let n = 0
+      for (const raw of arr) {
+        const it = raw as Partial<CharacterCard>
+        if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
+        const card = createEmptyCharacterCard()
+        card.id = typeof it.id === 'string' && it.id ? it.id : uuidv4()
+        card.name = it.name.trim()
+        card.age = typeof it.age === 'string' ? it.age : ''
+        card.gender = typeof it.gender === 'string' ? it.gender : ''
+        card.occupation = typeof it.occupation === 'string' ? it.occupation : ''
+        card.appearance = typeof it.appearance === 'string' ? it.appearance : ''
+        card.height = typeof it.height === 'string' ? it.height : ''
+        card.weight = typeof it.weight === 'string' ? it.weight : ''
+        card.distinguishingFeatures = typeof it.distinguishingFeatures === 'string' ? it.distinguishingFeatures : ''
+        card.personalityType = typeof it.personalityType === 'string' ? it.personalityType : ''
+        card.strengths = typeof it.strengths === 'string' ? it.strengths : ''
+        card.weaknesses = typeof it.weaknesses === 'string' ? it.weaknesses : ''
+        card.hobbies = typeof it.hobbies === 'string' ? it.hobbies : ''
+        card.backgroundStory = typeof it.backgroundStory === 'string' ? it.backgroundStory : ''
+        card.relationships = Array.isArray(it.relationships) ? it.relationships.map((r) => ({ targetName: String(r?.targetName ?? ''), relation: String(r?.relation ?? ''), description: String(r?.description ?? '') })) : []
+        card.customAttributes = Array.isArray(it.customAttributes) ? it.customAttributes.map((a) => ({ key: String(a?.key ?? ''), value: String(a?.value ?? '') })) : []
+        card.folderId = typeof it.folderId === 'string' ? it.folderId : undefined
+        card.enabled = it.enabled !== false
+        await addOrUpdateCharacterCard(card)
+        n++
+      }
+      setMsg(`导入完成：${n} 张人物卡`)
+    } catch (e) {
+      setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const selectedIds = [...bs.sel]
+
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Text c="dimmed" size="sm">共 {items.length} 张人物卡</Text>
-        <Group>
-          <FolderManager kind="cc" />
-          <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>
+      {bs.mode ? (
+        <Group justify="space-between" wrap="wrap">
+          <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 张</Text>
+          <Group gap={4} wrap="wrap">
+            <Select
+              placeholder="移动到文件夹"
+              clearable
+              size="xs"
+              data={ccFolders.map((f) => ({ value: f.id, label: f.name }))}
+              onChange={(v) => {
+                if (selectedIds.length) void moveItemsToFolder('cc', selectedIds, v ?? undefined)
+                bs.clear()
+              }}
+              style={{ minWidth: 150 }}
+            />
+            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用</Button>
+            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>停用</Button>
+            <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('cc', selectedIds); bs.clear() }}>删除</Button>
+            <Button size="xs" variant="subtle" onClick={() => { bs.setMode(false); bs.clear() }}>退出多选</Button>
+          </Group>
         </Group>
-      </Group>
+      ) : (
+        <Group justify="space-between">
+          <Text c="dimmed" size="sm">共 {items.length} 张人物卡{msg ? ` · ${msg}` : ''}</Text>
+          <Group gap={4}>
+            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
+            <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
+            <Tooltip label="选择人物卡 JSON 文件（导入合并）">
+              <label>
+                <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
+                <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
+              </label>
+            </Tooltip>
+            <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={openMerge}>合并同名</Button>
+            <FolderManager kind="cc" />
+            <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>
+          </Group>
+        </Group>
+      )}
       <Stack gap="xs">
         {items.map((c) => (
-          <Card key={c.id} withBorder padding="sm">
+          <Card
+            key={c.id}
+            withBorder
+            padding="sm"
+            style={bs.mode ? { borderColor: bs.sel.has(c.id) ? 'var(--chatbox-brand-color, #2563eb)' : undefined, cursor: 'pointer' } : undefined}
+            onClick={bs.mode ? () => bs.toggle(c.id) : undefined}
+          >
             <Group justify="space-between" wrap="nowrap">
+              {bs.mode && <Checkbox checked={bs.sel.has(c.id)} onChange={() => bs.toggle(c.id)} aria-label={c.name} size="sm" />}
               <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
                 <Group gap="xs">
                   <Text fw={600} size="sm">{c.name}</Text>
@@ -278,11 +507,13 @@ export function CharactersTab() {
                   <Text size="xs" c="gray">关系：{c.relationships.map((r) => `${r.targetName}(${r.relation})`).join('、')}</Text>
                 ) : null}
               </Stack>
-              <Group gap={4} wrap="nowrap">
-                <Switch checked={c.enabled !== false} size="xs" onChange={(e) => void toggleCharacterCard(c.id, e.currentTarget.checked)} />
-                <Button size="compact-xs" variant="subtle" onClick={() => openEdit(c)}>编辑</Button>
-                <Button size="compact-xs" variant="subtle" color="red" onClick={() => void removeCharacterCard(c.id)}>删除</Button>
-              </Group>
+              {!bs.mode && (
+                <Group gap={4} wrap="nowrap">
+                  <Switch checked={c.enabled !== false} size="xs" onClick={(e) => e.stopPropagation()} onChange={(e) => void toggleCharacterCard(c.id, e.currentTarget.checked)} />
+                  <Button size="compact-xs" variant="subtle" onClick={(e) => { e.stopPropagation(); openEdit(c) }}>编辑</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={(e) => { e.stopPropagation(); void removeCharacterCard(c.id) }}>删除</Button>
+                </Group>
+              )}
             </Group>
           </Card>
         ))}
@@ -296,7 +527,206 @@ export function CharactersTab() {
           <Button onClick={() => void save()}>保存</Button>
         </Group>
       </Modal>
+
+      <MergeCardsModal items={items} opened={mergeOpen} onClose={closeMerge} folderNameOf={(id) => ccFolders.find((f) => f.id === id)?.name} />
     </Stack>
+  )
+}
+
+/* ======================== 合并同名人物卡 ======================== */
+
+const CC_FIELD_LABELS: Record<string, string> = {
+  age: '年龄', gender: '性别', occupation: '职业', appearance: '外貌', height: '身高', weight: '体重',
+  distinguishingFeatures: '特征', personalityType: '性格', strengths: '优点', weaknesses: '缺点',
+  hobbies: '爱好', backgroundStory: '背景故事', enabled: '启用状态', folderId: '文件夹',
+  relationships: '关系', customAttributes: '自定义属性',
+}
+
+interface MergeConflict {
+  field: string
+  label: string
+  /** 各卡的值展示文本 */
+  values: string[]
+  /** 是否支持「合并去重」（数组字段） */
+  multi?: boolean
+}
+
+function MergeCardsModal(props: {
+  items: CharacterCard[]
+  opened: boolean
+  onClose: () => void
+  folderNameOf: (id?: string) => string | undefined
+}) {
+  const { items, opened, onClose, folderNameOf } = props
+  const [groupIdx, setGroupIdx] = useState(0)
+  const [choice, setChoice] = useState<Record<string, number | 'merge'>>({})
+  const [deleteOld, setDeleteOld] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  // 同名分组（名字完全相同的组，≥2 张）
+  const groups = useMemo(() => {
+    const m = new Map<string, CharacterCard[]>()
+    for (const c of items) {
+      const k = c.name.trim()
+      if (!k) continue
+      const g = m.get(k) ?? []
+      g.push(c)
+      m.set(k, g)
+    }
+    return [...m.entries()]
+      .filter(([, g]) => g.length > 1)
+      .map(([name, cards]) => ({ name, cards }))
+  }, [items])
+
+  const group = groups[groupIdx] ?? null
+
+  // 冲突字段：组内各卡取值不一致的字段
+  const conflicts = useMemo<MergeConflict[]>(() => {
+    if (!group) return []
+    const cards = group.cards
+    const out: MergeConflict[] = []
+    const scalars = ['age', 'gender', 'occupation', 'appearance', 'height', 'weight', 'distinguishingFeatures', 'personalityType', 'strengths', 'weaknesses', 'hobbies', 'backgroundStory'] as const
+    for (const f of scalars) {
+      const vals = cards.map((c) => String(c[f] ?? '').trim())
+      if (new Set(vals).size > 1) out.push({ field: f, label: CC_FIELD_LABELS[f] ?? f, values: vals.map((v) => v || '（空）') })
+    }
+    const enabledVals = cards.map((c) => (c.enabled !== false ? '启用' : '停用'))
+    if (new Set(enabledVals).size > 1) out.push({ field: 'enabled', label: '启用状态', values: enabledVals })
+    const folderVals = cards.map((c) => folderNameOf(c.folderId) ?? '无文件夹')
+    if (new Set(folderVals).size > 1) out.push({ field: 'folderId', label: '文件夹', values: folderVals })
+    for (const f of ['relationships', 'customAttributes'] as const) {
+      const sigs = cards.map((c) => JSON.stringify(c[f] ?? []))
+      if (new Set(sigs).size > 1) {
+        out.push({
+          field: f,
+          label: CC_FIELD_LABELS[f] ?? f,
+          values: cards.map((c) => (c[f]?.length ? `${(c[f] as unknown[]).length} 条` : '（空）')),
+          multi: true,
+        })
+      }
+    }
+    return out
+  }, [group, folderNameOf])
+
+  const doMerge = async () => {
+    if (!group || busy) return
+    setBusy(true)
+    setErr('')
+    try {
+      const cards = group.cards
+      const base = { ...cards[0] }
+      const rec = base as unknown as Record<string, unknown>
+      for (const cf of conflicts) {
+        const sel = choice[cf.field]
+        if (cf.multi) {
+          if (sel === 'merge') {
+            const merged = cards.flatMap((c) => (c[cf.field as 'relationships' | 'customAttributes'] ?? []) as unknown[])
+            const seen = new Set<string>()
+            rec[cf.field] = merged.filter((x) => {
+              const k = JSON.stringify(x)
+              if (seen.has(k)) return false
+              seen.add(k)
+              return true
+            })
+          } else {
+            const idx = typeof sel === 'number' ? sel : 0
+            rec[cf.field] = cards[idx][cf.field as 'relationships' | 'customAttributes'] ?? []
+          }
+        } else {
+          const idx = typeof sel === 'number' ? sel : 0
+          rec[cf.field] = cards[idx][cf.field as keyof CharacterCard]
+        }
+      }
+      rec.updatedAt = Date.now()
+      await addOrUpdateCharacterCard(base)
+      if (deleteOld) {
+        for (const c of cards.slice(1)) await removeCharacterCard(c.id)
+      }
+      onClose()
+      setChoice({})
+      setGroupIdx(0)
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal opened={opened} onClose={() => { onClose(); setGroupIdx(0); setChoice({}) }} title={`合并同名人物卡（${groups.length} 组）`} size="lg">
+      {groups.length === 0 ? (
+        <Text c="dimmed" size="sm">没有同名人物卡。合并会按「姓名完全相同」检索，先复制或新建同名卡再合并。</Text>
+      ) : (
+        <Stack gap="sm">
+          <Select
+            label="同名组合"
+            data={groups.map((g, i) => ({ value: String(i), label: `${g.name}（${g.cards.length} 张）` }))}
+            value={String(groupIdx)}
+            onChange={(v) => { setGroupIdx(Number(v) || 0); setChoice({}) }}
+          />
+          {group && (
+            <>
+              <Text size="xs" c="dimmed">
+                合并基准为「卡1」，冲突字段请选择保留哪张卡的值；关系/自定义属性可选择「合并去重」。
+              </Text>
+              {conflicts.length === 0 ? (
+                <Alert variant="light" color="teal" title="无冲突字段">
+                  该组人物卡字段完全一致，可直接合并（去重后仅保留一张）。
+                </Alert>
+              ) : (
+                conflicts.map((cf) => (
+                  <Box key={cf.field} style={{ border: '1px solid var(--chatbox-border-primary, #e5e7eb)', borderRadius: 10, padding: 10 }}>
+                    <Text fw={600} size="sm" mb={6}>{cf.label}</Text>
+                    <Group gap={6} wrap="wrap">
+                      {cf.values.map((v, i) => {
+                        const active = choice[cf.field] === i
+                        return (
+                          <UnstyledButton
+                            key={i}
+                            onClick={() => setChoice({ ...choice, [cf.field]: i })}
+                            style={{
+                              border: active ? '1.5px solid var(--chatbox-brand-color, #2563eb)' : '1px solid var(--chatbox-border-primary, #e5e7eb)',
+                              borderRadius: 8,
+                              padding: '4px 8px',
+                              fontSize: 12,
+                              background: active ? 'var(--chatbox-background-brand-secondary, #eff6ff)' : 'transparent',
+                            }}
+                          >
+                            卡{i + 1}：{v}
+                          </UnstyledButton>
+                        )
+                      })}
+                      {cf.multi && (
+                        <UnstyledButton
+                          onClick={() => setChoice({ ...choice, [cf.field]: 'merge' })}
+                          style={{
+                            border: choice[cf.field] === 'merge' ? '1.5px solid var(--chatbox-brand-color, #2563eb)' : '1px dashed var(--chatbox-border-primary, #cbd5e1)',
+                            borderRadius: 8,
+                            padding: '4px 8px',
+                            fontSize: 12,
+                            background: choice[cf.field] === 'merge' ? 'var(--chatbox-background-brand-secondary, #eff6ff)' : 'transparent',
+                          }}
+                        >
+                          合并去重
+                        </UnstyledButton>
+                      )}
+                    </Group>
+                  </Box>
+                ))
+              )}
+              <Divider />
+              <Switch label="合并后删除旧卡（保留卡1）" checked={deleteOld} onChange={(e) => setDeleteOld(e.currentTarget.checked)} />
+              {err ? <Text size="sm" c="red">{err}</Text> : null}
+              <Group justify="flex-end">
+                <Button variant="subtle" onClick={onClose}>取消</Button>
+                <Button onClick={() => void doMerge()} loading={busy} leftSection={<IconGitMerge size={14} />}>合并</Button>
+              </Group>
+            </>
+          )}
+        </Stack>
+      )}
+    </Modal>
   )
 }
 

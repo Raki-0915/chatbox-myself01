@@ -92,6 +92,55 @@ export async function toggleWorldBook(id: string, enabled: boolean): Promise<voi
   await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
 }
 
+/* ======================== 批量操作（世界书/人物卡通用） ======================== */
+
+/** 批量移动到文件夹（folderId 传 undefined 表示移出文件夹） */
+export async function moveItemsToFolder(kind: 'wb' | 'cc', ids: string[], folderId?: string): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const now = Date.now()
+  if (kind === 'wb') {
+    const next = store.get(worldBooksAtom).map((x) => (ids.includes(x.id) ? { ...x, folderId, updatedAt: now } : x))
+    store.set(worldBooksAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
+  } else {
+    const next = store.get(characterCardsAtom).map((x) => (ids.includes(x.id) ? { ...x, folderId, updatedAt: now } : x))
+    store.set(characterCardsAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.characterCards, next)
+  }
+}
+
+/** 批量启用/停用 */
+export async function setItemsEnabled(kind: 'wb' | 'cc', ids: string[], enabled: boolean): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const now = Date.now()
+  if (kind === 'wb') {
+    const next = store.get(worldBooksAtom).map((x) => (ids.includes(x.id) ? { ...x, enabled, updatedAt: now } : x))
+    store.set(worldBooksAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
+  } else {
+    const next = store.get(characterCardsAtom).map((x) => (ids.includes(x.id) ? { ...x, enabled, updatedAt: now } : x))
+    store.set(characterCardsAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.characterCards, next)
+  }
+}
+
+/** 批量删除 */
+export async function removeItems(kind: 'wb' | 'cc', ids: string[]): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  if (kind === 'wb') {
+    const next = store.get(worldBooksAtom).filter((x) => !ids.includes(x.id))
+    store.set(worldBooksAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
+  } else {
+    const next = store.get(characterCardsAtom).filter((x) => !ids.includes(x.id))
+    store.set(characterCardsAtom, next)
+    await modSetItem(MOD_STORAGE_KEYS.characterCards, next)
+  }
+}
+
 /* ======================== 人物卡 CRUD ======================== */
 
 export function createEmptyCharacterCard(): CharacterCard {
