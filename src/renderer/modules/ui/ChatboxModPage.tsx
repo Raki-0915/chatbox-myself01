@@ -1474,6 +1474,9 @@ function SettingsTab() {
       const r = await fetch('https://api.siliconflow.cn/v1/user/info', {
         headers: { Authorization: `Bearer ${key}` },
       })
+      if (r.status === 410) {
+        throw new Error('SiliconFlow 官方已下线 /user/info 余额接口（2026-08-14 起），替代接口尚未发布，暂无法在应用内查询余额；可登录 cloud.siliconflow.cn 控制台查看')
+      }
       if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 401 ? '（Key 无效或已过期）' : ''}`)
       const j = (await r.json()) as {
         data?: { totalBalance?: number | string; cashBalance?: number | string; accruedBalance?: number | string }
