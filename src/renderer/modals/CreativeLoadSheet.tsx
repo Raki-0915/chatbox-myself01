@@ -12,7 +12,7 @@
  *  - modSettingsAtom.autoUpdateEnabled（自动更新开关）
  */
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
-import { Box, Button, Checkbox, Divider, Flex, Group, Modal, ScrollArea, Stack, Switch, Text, UnstyledButton } from '@mantine/core'
+import { Box, Button, Checkbox, Divider, Flex, Group, Modal, Stack, Switch, Text, UnstyledButton } from '@mantine/core'
 import { IconBook2, IconBolt, IconUsers } from '@tabler/icons-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
@@ -62,14 +62,15 @@ function SheetSection(props: {
             gap="sm"
             px="sm"
             py={8}
-            style={{ border: selected.includes(e.id) ? `1.5px solid ${accent}` : '1px solid var(--chatbox-border-primary, #e5e7eb)', borderRadius: 10, background: selected.includes(e.id) ? 'var(--chatbox-background-brand-secondary, #f0fdf4)' : 'transparent' }}
+            onClick={() => onToggle(e.id)}
+            style={{ cursor: 'pointer', border: selected.includes(e.id) ? `1.5px solid ${accent}` : '1px solid var(--chatbox-border-primary, #e5e7eb)', borderRadius: 10, background: selected.includes(e.id) ? 'var(--chatbox-background-brand-secondary, #f0fdf4)' : 'transparent' }}
           >
             <Checkbox
               checked={selected.includes(e.id)}
-              onChange={() => onToggle(e.id)}
               color="chatbox-brand"
               size="sm"
               aria-label={e.name}
+              style={{ pointerEvents: 'none' }}
             />
             <Box style={{ flex: 1, minWidth: 0 }}>
               <Text size="sm" fw={600} lineClamp={1}>
@@ -253,7 +254,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
         </Box>
 
         {/* 内容 */}
-        <ScrollArea.Autosize mah="62vh" type="auto" offsetScrollbars>
+        <Box style={{ maxHeight: '62vh', overflow: 'auto' }}>
           <Stack px="md" py="sm" gap="md">
             {/* 按顶部标签切换：世界书 或 人物卡 */}
             {tab === 'wb' ? (
@@ -317,7 +318,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
               />
             </Group>
           </Stack>
-        </ScrollArea.Autosize>
+        </Box>
 
         {/* 底部操作 */}
         <Box px="md" py="sm" style={{ borderTop: '1px solid var(--chatbox-border-primary, #f0f1f3)' }}>
