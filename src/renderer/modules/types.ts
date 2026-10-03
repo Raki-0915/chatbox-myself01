@@ -97,6 +97,8 @@ export interface ModSettings {
   wbInjectionLimit: number
   /** 人物卡注入段落长度上限（字符） */
   ccInjectionLimit: number
+  /** 硅基流动（SiliconFlow）API Key（用户自填，仅本地保存） */
+  siliconflowApiKey?: string
 }
 
 /** 会话装载目标 */

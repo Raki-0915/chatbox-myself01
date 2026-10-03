@@ -18,6 +18,7 @@ export const DEFAULT_MOD_SETTINGS: ModSettings = {
   backupLimit: 5,
   wbInjectionLimit: 4000,
   ccInjectionLimit: 6000,
+  siliconflowApiKey: '',
 }
 
 /* ======================== Jotai atoms ======================== */

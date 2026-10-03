@@ -307,7 +307,11 @@ export function WorldBooksTab() {
     if (!file) return
     setImporting(true)
     try {
-      const arr = await readJsonArrayFile(file)
+      // 先尝试识别酒馆 World Info 标准格式（JSON / CSV）
+      const text = await file.text()
+      const { parseWorldInfo } = await import('../world-info-import')
+      const wi = parseWorldInfo(text)
+      const arr = wi ? (wi as unknown as unknown[]) : await readJsonArrayFile(file)
       let n = 0
       for (const raw of arr) {
         const it = raw as Partial<WorldBookEntry>
@@ -327,7 +331,7 @@ export function WorldBooksTab() {
         })
         n++
       }
-      setMsg(arr.length === 0 ? '导入 0 条：文件中没有可识别的世界书（支持数组 / 单条 / 导出包格式）' : `导入完成：${n} 条世界书`)
+      setMsg(arr.length === 0 ? '导入 0 条：文件中没有可识别的世界书（支持数组 / 单条 / 导出包 / 酒馆 World Info JSON·CSV 格式）' : `导入完成：${n} 条世界书`)
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -1450,6 +1454,44 @@ function SettingsTab() {
   const [hasV48, setHasV48] = useState(false)
   const [exportCfg, setExportCfg] = useState<ExportModalConfig | null>(null)
   const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
+  // 硅基流动余额查询
+  const [sfKey, setSfKey] = useState(settings.siliconflowApiKey ?? '')
+  const [sfBusy, setSfBusy] = useState(false)
+  const [sfResult, setSfResult] = useState('')
+  const [sfOk, setSfOk] = useState(false)
+
+  const querySfBalance = async () => {
+    const key = sfKey.trim()
+    if (!key) {
+      setSfResult('请先填入 API Key')
+      setSfOk(false)
+      return
+    }
+    setSfBusy(true)
+    setSfResult('查询中…')
+    try {
+      await updateModSettings({ siliconflowApiKey: key })
+      const r = await fetch('https://api.siliconflow.cn/v1/user/info', {
+        headers: { Authorization: `Bearer ${key}` },
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 401 ? '（Key 无效或已过期）' : ''}`)
+      const j = (await r.json()) as {
+        data?: { totalBalance?: number | string; cashBalance?: number | string; accruedBalance?: number | string }
+      }
+      const d = j.data ?? {}
+      const yuan = (v: unknown) => {
+        const n = Number(v)
+        return Number.isFinite(n) ? n.toFixed(2) : '--'
+      }
+      setSfResult(`总余额：¥${yuan(d.totalBalance)} ｜ 可用余额：¥${yuan(d.cashBalance)}`)
+      setSfOk(true)
+    } catch (e) {
+      setSfResult(`查询失败：${String((e as Error)?.message ?? e)}`)
+      setSfOk(false)
+    } finally {
+      setSfBusy(false)
+    }
+  }
 
   useEffect(() => {
     void import('../migration').then(({ hasV48Data }) => setHasV48(hasV48Data()))
@@ -1533,6 +1575,20 @@ function SettingsTab() {
         description="导出世界书 / 人物卡 / 设置 / 日志 / 备份的完整 JSON。可修改导出文件名；点击导出后按系统提示选择保存到指定位置。"
         onDone={(_ok, m) => setRestoreResult(m)}
       />
+      <Divider label="硅基流动（SiliconFlow）" labelPosition="left" />
+      <Group align="flex-end" gap="xs">
+        <TextInput
+          style={{ flex: 1 }}
+          size="xs"
+          type="password"
+          label="API Key"
+          placeholder="sk-xxx 粘贴你的 SiliconFlow Key"
+          value={sfKey}
+          onChange={(e) => setSfKey(e.currentTarget.value)}
+        />
+        <Button size="xs" onClick={() => void querySfBalance()} loading={sfBusy}>查询余额</Button>
+      </Group>
+      {sfResult ? <Text size="xs" c={sfOk ? 'green' : 'red'}>{sfResult}</Text> : null}
       <Divider label="关于" labelPosition="left" />
       <Text size="xs" c="dimmed">
         Chatbox Mod fork · 版本：{MOD_BUILD}

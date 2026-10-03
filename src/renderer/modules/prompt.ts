@@ -14,7 +14,7 @@ function getEnabledByIds<T extends { id: string; enabled?: boolean }>(all: T[], 
 }
 
 /** 世界书匹配（纯函数）：always/regex/keyword 触发与段落组装，实现在 worldbook-match.ts（可独立单测） */
-import { splitWorldBookSections } from './worldbook-match'
+import { splitWorldBookSections, adaptiveInjectionBudget } from './worldbook-match'
 
 /** 人物卡内容 → 注入段落（格式化 RPG 字段） */
 export function buildCharacterCardSection(cards: CharacterCard[], dialogText: string, limit: number): string {
@@ -63,11 +63,17 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
     const allCc = store.get(characterCardsAtom)
     const wb = getEnabledByIds(allWb, worldBookIds ?? [])
     const cc = getEnabledByIds(allCc, characterCardIds ?? [])
-    const ccSection = buildCharacterCardSection(cc, dialogText, settings.ccInjectionLimit)
+    // 注入体积自适应：对话越长预算越小（常驻优先，场景占剩余）
+    const ccBudget = adaptiveInjectionBudget(settings.ccInjectionLimit, dialogText.length)
+    const ccSection = buildCharacterCardSection(cc, dialogText, ccBudget)
+    const wbBudget = adaptiveInjectionBudget(settings.wbInjectionLimit, dialogText.length)
+    const residentLimit = Math.min(Math.floor(wbBudget * 0.6), settings.wbInjectionLimit)
     const { resident, scene } = splitWorldBookSections(wb, dialogText, settings.wbInjectionLimit)
+    const res = resident.slice(0, residentLimit)
+    const sc = scene.slice(0, Math.max(0, wbBudget - res.length))
     const wbParts: string[] = []
-    if (resident) wbParts.push(`## World Book · 常驻设定\n${resident}`)
-    if (scene) wbParts.push(`## World Book · 场景触发\n${scene}`)
+    if (res) wbParts.push(`## World Book · 常驻设定\n${res}`)
+    if (sc) wbParts.push(`## World Book · 场景触发\n${sc}`)
     const wbSection = wbParts.join('\n\n')
     const parts = [ccSection, wbSection].filter(Boolean)
     return parts.length ? parts.join('\n\n') : ''
