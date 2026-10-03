@@ -13,6 +13,7 @@ import NiceModal, { useModal } from '@ebay/nice-modal-react'
 import { getDefaultStore } from 'jotai'
 import { Badge, Box, Button, Checkbox, Divider, Group, Modal, Stack, Text } from '@mantine/core'
 import type { AutoUpdateDiff } from '../modules/auto-update'
+import { isTrivialChange } from '../modules/text-similarity'
 import { characterCardsAtom, worldBooksAtom } from '../modules/store'
 
 type Sel = { add: Set<number>; update: Set<number>; remove: Set<string> }
@@ -22,6 +23,17 @@ function newSel(add: number, update: number, remove: string[]): Sel {
   return {
     add: new Set(Array.from({ length: add }, (_, i) => i)),
     update: new Set(Array.from({ length: update }, (_, i) => i)),
+    remove: new Set(remove),
+  }
+}
+
+/** 初始勾选：轻微改动（相似度 ≥ 阈值）的 update 默认不勾选，其余全部勾选 */
+function newSelFiltered(add: number, update: number, remove: string[], trivialUpdate: Set<number>): Sel {
+  const upd = new Set<number>()
+  for (let i = 0; i < update; i++) if (!trivialUpdate.has(i)) upd.add(i)
+  return {
+    add: new Set(Array.from({ length: add }, (_, i) => i)),
+    update: upd,
     remove: new Set(remove),
   }
 }
@@ -80,9 +92,9 @@ function PickEntryList({
   )
 }
 
-/** 更新条目列表：每条 checkbox + 「旧 → 新」对比 */
+/** 更新条目列表：每条 checkbox + 「旧 → 新」对比；轻微改动条目显示标签且默认未勾选 */
 function PickUpdateList({
-  title, items, getLabel, selected, onToggle, oldOf, oldField, newField,
+  title, items, getLabel, selected, onToggle, oldOf, oldField, newField, trivial,
 }: {
   title: string
   items: Array<Record<string, unknown>>
@@ -92,13 +104,14 @@ function PickUpdateList({
   oldOf: (name: string) => Record<string, unknown> | undefined
   oldField: string
   newField: string
+  trivial?: Set<number>
 }) {
   if (items.length === 0) return null
   return (
     <Box>
       <Group gap={6} mb={4}>
         <Badge size="xs" color="blue">{title}</Badge>
-        <Text size="xs" c="dimmed">{selected.size}/{items.length} 条</Text>
+        <Text size="xs" c="dimmed">{selected.size}/{items.length} 条{trivial && trivial.size > 0 ? `（轻微改动 ${trivial.size} 条默认未勾选）` : ''}</Text>
       </Group>
       <Stack gap={5}>
         {items.slice(0, 20).map((raw, i) => {
@@ -107,11 +120,13 @@ function PickUpdateList({
           const oldIt = oldOf(label)
           const oldTxt = oldIt ? String(oldIt[oldField] ?? '') : ''
           const newTxt = String(it[newField] ?? '')
+          const isTrivial = Boolean(trivial?.has(i))
           return (
-            <Box key={i} style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: '6px 8px', background: '#fafafa' }}>
+            <Box key={i} style={{ border: isTrivial ? '1px solid #ffe0b2' : '1px solid #e0e0e0', borderRadius: 6, padding: '6px 8px', background: isTrivial ? '#fff8f0' : '#fafafa' }}>
               <Group gap={4} mb={4}>
                 <Checkbox size="xs" checked={selected.has(i)} onChange={() => onToggle(i)} />
                 <Text size="xs" fw={600}>{label}</Text>
+                {isTrivial ? <Badge size="xs" color="orange" variant="light">仅轻微改动</Badge> : null}
               </Group>
               {!oldIt ? (
                 <Text size="xs" c="dimmed">（未找到同名旧条目，此条实际不会执行更新）</Text>
@@ -229,14 +244,7 @@ function PickNewCardList({
 const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) => {
   const modal = useModal()
   const [busy, setBusy] = useState(false)
-  const [sel, setSel] = useState<SelAll>(() => ({
-    wb: newSel(diff.wb.add.length, diff.wb.update.length, diff.wb.remove),
-    cc: newSel(diff.cc.add.length, diff.cc.update.length, diff.cc.remove),
-  }))
-  const wbName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
-  const ccName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
-
-  // 从 store 读当前条目，用于「旧 → 新」对比与删除摘要
+  // 从 store 读当前条目，用于「旧 → 新」对比、删除摘要与轻微改动判定
   const oldLookup = useMemo(() => {
     const store = getDefaultStore()
     const wbMap = new Map<string, Record<string, unknown>>()
@@ -245,6 +253,34 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     for (const c of store.get(characterCardsAtom)) ccMap.set(c.name, { backgroundStory: c.backgroundStory })
     return { wbOf: (n: string) => wbMap.get(n), ccOf: (n: string) => ccMap.get(n) }
   }, [])
+  // 轻微改动集合：新旧内容高度相似且长度无明显增长的 update 条目（默认不勾选，可手动勾选应用）
+  const trivialWb = useMemo(() => {
+    const s = new Set<number>()
+    diff.wb.update.forEach((it, i) => {
+      const oldIt = oldLookup.wbOf(String(it.name ?? ''))
+      const oldTxt = oldIt ? String(oldIt.content ?? '') : ''
+      const newTxt = String(it.content ?? '')
+      if (oldTxt && newTxt && isTrivialChange(oldTxt, newTxt)) s.add(i)
+    })
+    return s
+  }, [diff, oldLookup])
+  const trivialCc = useMemo(() => {
+    const s = new Set<number>()
+    diff.cc.update.forEach((it, i) => {
+      const oldIt = oldLookup.ccOf(String(it.name ?? ''))
+      const oldTxt = oldIt ? String(oldIt.backgroundStory ?? '') : ''
+      const newTxt = String(it.backgroundStory ?? '')
+      if (oldTxt && newTxt && isTrivialChange(oldTxt, newTxt)) s.add(i)
+    })
+    return s
+  }, [diff, oldLookup])
+
+  const [sel, setSel] = useState<SelAll>(() => ({
+    wb: newSelFiltered(diff.wb.add.length, diff.wb.update.length, diff.wb.remove, trivialWb),
+    cc: newSelFiltered(diff.cc.add.length, diff.cc.update.length, diff.cc.remove, trivialCc),
+  }))
+  const wbName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
+  const ccName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
 
   const total = diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length +
     diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length
@@ -322,7 +358,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
       ) : (
         <Stack gap="md">
           <Text size="xs" c="dimmed">
-            已勾选 {selTotal}/{total} 条。更新条目会显示「旧 → 新」对比，确认旧信息没有被丢弃再勾选；删除条目为红色标注（应用前自动备份快照）。
+            已勾选 {selTotal}/{total} 条。更新条目会显示「旧 → 新」对比，确认旧信息没有被丢弃再勾选；删除条目为红色标注（应用前自动备份快照）。<Text span fw={600} c="orange">「仅轻微改动」条目与旧版基本一致，默认未勾选，需要应用请手动勾选。</Text>
           </Text>
           <Box style={{ maxHeight: 430, overflow: 'auto', paddingRight: 4 }}>
             <Stack gap="sm">
@@ -331,6 +367,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
               <PickUpdateList
                 title="更新" items={diff.wb.update} getLabel={wbName} selected={sel.wb.update}
                 onToggle={(i) => toggle('wb', 'update', i)} oldOf={oldLookup.wbOf} oldField="content" newField="content"
+                trivial={trivialWb}
               />
               <PickRemoveList title="删除" names={diff.wb.remove} selected={sel.wb.remove} onToggle={(n) => toggleRemove('wb', n)} summaryOf={(n) => String(oldLookup.wbOf(n)?.content ?? '')} />
               {hasCc && <Divider label="人物卡" labelPosition="left" />}
@@ -338,6 +375,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
               <PickUpdateList
                 title="更新" items={diff.cc.update} getLabel={ccName} selected={sel.cc.update}
                 onToggle={(i) => toggle('cc', 'update', i)} oldOf={oldLookup.ccOf} oldField="backgroundStory" newField="backgroundStory"
+                trivial={trivialCc}
               />
               <PickRemoveList title="删除" names={diff.cc.remove} selected={sel.cc.remove} onToggle={(n) => toggleRemove('cc', n)} summaryOf={(n) => String(oldLookup.ccOf(n)?.backgroundStory ?? '')} />
             </Stack>

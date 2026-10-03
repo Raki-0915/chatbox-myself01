@@ -5,6 +5,10 @@
  * 合并写回世界书/人物卡。带并发锁、备份快照、日志与可选人工确认。
  */
 import { getDefaultStore } from 'jotai'
+import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
+
+export { similarityRatio, SIMILARITY_TRIVIAL }
+
 import { v4 as uuidv4 } from 'uuid'
 import { createModel } from '@/adapters'
 import { rendererApplication } from '@/app/renderer-application'
