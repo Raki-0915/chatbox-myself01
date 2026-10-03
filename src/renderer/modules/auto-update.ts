@@ -145,11 +145,11 @@ export interface AutoUpdateDiff {
  * @param sid 会话 id（取其设置、最近消息、装载条目）
  * @param opts.fixedTarget 固定目标会话 id（v48 的 target mode，可选）
  * @param opts.force 强制运行（无视锁）
- * @param opts.onPreview 若设置 requireConfirm，需弹「更新预览」让用户确认（返回 true 才写回）；兼容旧 onConfirm
+ * @param opts.onPreview 若设置 requireConfirm，需弹「更新预览」让用户确认；返回「勾选后的差异 diff」（null 表示取消）；兼容旧 onConfirm（boolean）
  */
 export async function maybeAutoUpdateWorldBooks(
   sid: string,
-  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<boolean> } = {}
+  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null> } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
   if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0 }
@@ -188,23 +188,28 @@ export async function maybeAutoUpdateWorldBooks(
       ], {}
   )
     const raw = resultText(modelResult)
-    const diff = parseDiff(raw)
+    let diff = parseDiff(raw)
     if (!diff) {
       throw new Error('模型输出无法解析为 JSON 差异')
     }
 
-    // 人工确认（可配置）：优先展示「更新预览」供用户逐条确认
+    // 人工确认（可配置）：优先展示「更新预览」供用户逐条勾选（返回勾选后的差异）
     if (settings.requireConfirm) {
-      let confirmed = false
       if (opts.onPreview) {
-        confirmed = await opts.onPreview(diff)
+        const picked = await opts.onPreview(diff)
+        if (!picked) {
+          result.ok = false
+          result.error = '已取消'
+          return result
+        }
+        diff = picked
       } else if (opts.onConfirm) {
-        confirmed = await opts.onConfirm()
-      }
-      if (!confirmed) {
-        result.ok = false
-        result.error = '已取消'
-        return result
+        const confirmed = await opts.onConfirm()
+        if (!confirmed) {
+          result.ok = false
+          result.error = '已取消'
+          return result
+        }
       }
     }
 
