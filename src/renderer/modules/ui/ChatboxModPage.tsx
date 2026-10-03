@@ -14,6 +14,7 @@ import {
   Checkbox,
   Divider,
   Group,
+  Grid,
   Modal,
   NumberInput,
   Select,
@@ -27,7 +28,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBook2, IconBookDownload, IconBookUpload, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
+import { IconBook2, IconBookDownload, IconBookUpload, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
@@ -105,7 +106,9 @@ function useBatchSelect<T extends { id: string }>(items: T[]) {
       return n
     })
   const clear = () => setSel(new Set())
-  // 列表变化时清理失效选中
+  /** 全选/反选（传入当前过滤后的 id 列表） */
+  const setMany = (ids: string[]) => setSel(new Set(ids))
+  /** 列表变化时清理失效选中 */
   useEffect(() => {
     const valid = new Set(items.map((x) => x.id))
     setSel((s) => {
@@ -113,13 +116,88 @@ function useBatchSelect<T extends { id: string }>(items: T[]) {
       return keep.size === s.size ? s : keep
     })
   }, [items])
-  return { mode, setMode, sel, setSel, toggle, clear }
+  return { mode, setMode, sel, setSel, toggle, clear, setMany }
+}
+
+/** 新建文件夹弹窗（共享） */
+function NewFolderModal({ opened, onClose, kind, onCreated }: { opened: boolean; onClose: () => void; kind: 'wb' | 'cc'; onCreated: (f: ModFolder) => void }) {
+  const [name, setName] = useState('')
+  return (
+    <Modal opened={opened} onClose={() => { setName(''); onClose() }} title="新建文件夹" size="sm">
+      <Stack gap="sm">
+        <TextInput
+          placeholder="文件夹名称"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+          data-autofocus
+        />
+        <Group justify="flex-end">
+          <Button variant="subtle" size="xs" onClick={onClose}>取消</Button>
+          <Button
+            size="xs"
+            disabled={!name.trim()}
+            onClick={async () => {
+              if (!name.trim()) return
+              const folder: ModFolder = { id: uuidv4(), name: name.trim(), kind }
+              await upsertFolder(folder)
+              setName('')
+              onClose()
+              onCreated(folder)
+            }}
+          >
+            创建
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
+/** 分类标签行：全部(N) / 未分类(N) / 各文件夹(N) + 新建/管理文件夹 */
+function CategoryTabs({
+  kind,
+  folders,
+  items,
+  active,
+  onChange,
+  onNewFolder,
+}: {
+  kind: 'wb' | 'cc'
+  folders: ModFolder[]
+  items: { folderId?: string }[]
+  active: string
+  onChange: (v: string) => void
+  onNewFolder: () => void
+}) {
+  const counts = useMemo(() => {
+    const none = items.filter((i) => !i.folderId).length
+    const byFolder = new Map<string, number>()
+    for (const i of items) {
+      if (i.folderId) byFolder.set(i.folderId, (byFolder.get(i.folderId) ?? 0) + 1)
+    }
+    return { none, byFolder }
+  }, [items])
+  const tabs = [
+    { key: 'all', label: `全部(${items.length})` },
+    { key: 'none', label: `未分类(${counts.none})` },
+    ...folders.map((f) => ({ key: f.id, label: `${f.name}(${counts.byFolder.get(f.id) ?? 0})` })),
+  ]
+  return (
+    <Group gap={6} wrap="wrap">
+      {tabs.map((t) => (
+        <Button key={t.key} size="compact-xs" variant={active === t.key ? 'filled' : 'default'} onClick={() => onChange(t.key)}>
+          {t.label}
+        </Button>
+      ))}
+      <Button size="compact-xs" variant="subtle" onClick={onNewFolder}>+ 新建文件夹</Button>
+      <FolderManager kind={kind} />
+    </Group>
+  )
 }
 
 /** 移动到文件夹下拉（含「＋新建文件夹」内联入口） */
 function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; folders: ModFolder[]; ids: string[]; onMoved: () => void }) {
   const [newOpen, { open: openNew, close: closeNew }] = useDisclosure(false)
-  const [newName, setNewName] = useState('')
   return (
     <>
       <Select
@@ -132,42 +210,23 @@ function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; 
         ]}
         onChange={(v) => {
           if (v === '__new__') {
-            setNewName('')
             openNew()
             return
           }
           if (ids.length) void moveItemsToFolder(kind, ids, v ?? undefined)
           onMoved()
         }}
-        style={{ minWidth: 150 }}
+        style={{ minWidth: 150, width: '100%' }}
       />
-      <Modal opened={newOpen} onClose={closeNew} title="新建文件夹并移动" size="sm">
-        <Stack gap="sm">
-          <TextInput
-            placeholder="文件夹名称"
-            value={newName}
-            onChange={(e) => setNewName(e.currentTarget.value)}
-            data-autofocus
-          />
-          <Group justify="flex-end">
-            <Button variant="subtle" size="xs" onClick={closeNew}>取消</Button>
-            <Button
-              size="xs"
-              disabled={!newName.trim()}
-              onClick={async () => {
-                if (!newName.trim()) return
-                const folder: ModFolder = { id: uuidv4(), name: newName.trim(), kind }
-                await upsertFolder(folder)
-                if (ids.length) await moveItemsToFolder(kind, ids, folder.id)
-                closeNew()
-                onMoved()
-              }}
-            >
-              创建并移动
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <NewFolderModal
+        opened={newOpen}
+        onClose={closeNew}
+        kind={kind}
+        onCreated={(f) => {
+          if (ids.length) void moveItemsToFolder(kind, ids, f.id)
+          onMoved()
+        }}
+      />
     </>
   )
 }
@@ -272,38 +331,84 @@ export function WorldBooksTab() {
 
   const selectedIds = [...bs.sel]
 
+  // 搜索 + 分类过滤
+  const [query, setQuery] = useState('')
+  const [cat, setCat] = useState('all')
+  const [newFolderOpen, { open: openNewFolder, close: closeNewFolder }] = useDisclosure(false)
+  const filtered = useMemo(() => {
+    let list = items
+    if (cat === 'none') list = list.filter((i) => !i.folderId)
+    else if (cat !== 'all') list = list.filter((i) => i.folderId === cat)
+    const q = query.trim().toLowerCase()
+    if (q) {
+      list = list.filter((i) => [i.name, i.content, ...(i.keywords ?? [])].join(' ').toLowerCase().includes(q))
+    }
+    return list
+  }, [items, query, cat])
+
+  // 导出选中
+  const doExportSel = async () => {
+    const list = items.filter((i) => selectedIds.includes(i.id))
+    const r = await exportEntriesJson('chatbox-mod-worldbooks-selected.json', list)
+    setMsg(r.ok ? `已导出选中 ${list.length} 条世界书` : `导出失败：${r.error}`)
+    bs.clear()
+  }
+  // 全选/取消（按当前过滤结果）
+  const toggleAll = () => {
+    const ids = filtered.map((i) => i.id)
+    if (bs.sel.size === ids.length && ids.length > 0) bs.clear()
+    else bs.setMany(ids)
+  }
+
   return (
     <Stack gap="md">
-      {bs.mode ? (
-        <Group justify="space-between" wrap="wrap">
-          <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 条</Text>
-          <Group gap={4} wrap="wrap">
-            <MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} />
-            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用</Button>
-            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>停用</Button>
-            <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('wb', selectedIds); bs.clear() }}>删除</Button>
-            <Button size="xs" variant="subtle" onClick={() => { bs.setMode(false); bs.clear() }}>退出多选</Button>
-          </Group>
-        </Group>
-      ) : (
-        <Group justify="space-between">
-          <Text c="dimmed" size="sm">共 {items.length} 条世界书{msg ? ` · ${msg}` : ''}</Text>
-          <Group gap={4}>
+      <Group justify="space-between" wrap="wrap">
+        <Text c="dimmed" size="sm">{bs.mode ? `已选 ${bs.sel.size}/${filtered.length} 条` : (msg ? msg : `共 ${items.length} 条世界书`)}</Text>
+        <Group gap={4}>
+          <Tooltip label="选择世界书 JSON 文件（导入合并）">
+            <label>
+              <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
+              <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
+            </label>
+          </Tooltip>
+          <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
+          {bs.mode ? (
+            <Button size="xs" variant="filled" color="green" onClick={() => { bs.setMode(false); bs.clear() }}>完成</Button>
+          ) : (
             <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
-            <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
-            <Tooltip label="选择世界书 JSON 文件（导入合并）">
-              <label>
-                <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
-                <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
-              </label>
-            </Tooltip>
-            <FolderManager kind="wb" />
-            <Button size="xs" onClick={openNew}>+ 新建世界书</Button>
-          </Group>
+          )}
+          {!bs.mode && <Button size="xs" onClick={openNew}>+ 新建世界书</Button>}
         </Group>
+      </Group>
+      <TextInput
+        placeholder="按名称、关键词搜索……"
+        value={query}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+        leftSection={<IconSearch size={14} />}
+      />
+      <CategoryTabs
+        kind="wb"
+        folders={wbFolders}
+        items={items}
+        active={cat}
+        onChange={setCat}
+        onNewFolder={() => { setCat('all'); openNewFolder() }}
+      />
+      <NewFolderModal opened={newFolderOpen} onClose={closeNewFolder} kind="wb" onCreated={(f) => setCat(f.id)} />
+      {bs.mode && (
+        <Grid columns={3} gutter="xs">
+          <Grid.Col span={1}>
+            <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
+          </Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
+          <Grid.Col span={1}><MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={() => { void removeItems('wb', selectedIds); bs.clear() }}>删除所选</Button></Grid.Col>
+        </Grid>
       )}
       <Stack gap="xs">
-        {items.map((w) => (
+        {filtered.map((w) => (
           <Card
             key={w.id}
             withBorder
@@ -334,7 +439,7 @@ export function WorldBooksTab() {
             </Group>
           </Card>
         ))}
-        {items.length === 0 ? <Text c="dimmed" size="sm">还没有世界书，点击右上角新建。</Text> : null}
+        {filtered.length === 0 ? <Text c="dimmed" size="sm">{items.length === 0 ? '还没有世界书，点击右上角新建。' : '当前筛选条件下没有匹配的世界书。'}</Text> : null}
       </Stack>
 
       <Modal opened={opened} onClose={close} title="编辑世界书" size="lg">
@@ -387,7 +492,7 @@ function FolderManager({ kind }: { kind: 'wb' | 'cc' }) {
   const list = folders.filter((f) => f.kind === kind)
   return (
     <>
-      <Button size="xs" variant="default" onClick={open}>文件夹</Button>
+      <Button size="xs" variant="default" onClick={open}>管理文件夹</Button>
       <Modal opened={opened} onClose={close} title="文件夹管理" size="sm">
         <Stack gap="xs">
           {list.map((f) => (
@@ -497,51 +602,103 @@ export function CharactersTab() {
 
   const selectedIds = [...bs.sel]
 
+  // 搜索 + 分类过滤
+  const [query, setQuery] = useState('')
+  const [cat, setCat] = useState('all')
+  const [newFolderOpen, { open: openNewFolder, close: closeNewFolder }] = useDisclosure(false)
+  const filtered = useMemo(() => {
+    let list = items
+    if (cat === 'none') list = list.filter((c) => !c.folderId)
+    else if (cat !== 'all') list = list.filter((c) => c.folderId === cat)
+    const q = query.trim().toLowerCase()
+    if (q) {
+      list = list.filter((c) =>
+        [c.name, c.occupation, c.personalityType, c.age, c.gender, c.backgroundStory].join(' ').toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [items, query, cat])
+
+  // 导出选中
+  const doExportSel = async () => {
+    const list = items.filter((c) => selectedIds.includes(c.id))
+    const r = await exportEntriesJson('chatbox-mod-charactercards-selected.json', list)
+    setMsg(r.ok ? `已导出选中 ${list.length} 张人物卡` : `导出失败：${r.error}`)
+    bs.clear()
+  }
+  // 全选/取消（按当前过滤结果）
+  const toggleAll = () => {
+    const ids = filtered.map((c) => c.id)
+    if (bs.sel.size === ids.length && ids.length > 0) bs.clear()
+    else bs.setMany(ids)
+  }
+
   return (
     <Stack gap="md">
-      {bs.mode ? (
-        <Group justify="space-between" wrap="wrap">
-          <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 张</Text>
-          <Group gap={4} wrap="wrap">
-            <MoveFolderSelect kind="cc" folders={ccFolders} ids={selectedIds} onMoved={() => bs.clear()} />
-            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用</Button>
-            <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>停用</Button>
+      <Group justify="space-between" wrap="wrap">
+        <Text c="dimmed" size="sm">{bs.mode ? `已选 ${bs.sel.size}/${filtered.length} 张` : (msg ? msg : `共 ${items.length} 张人物卡`)}</Text>
+        <Group gap={4}>
+          <Tooltip label="选择人物卡 JSON 文件（导入合并）">
+            <label>
+              <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
+              <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
+            </label>
+          </Tooltip>
+          <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
+          {bs.mode ? (
+            <Button size="xs" variant="filled" color="green" onClick={() => { bs.setMode(false); bs.clear() }}>完成</Button>
+          ) : (
+            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
+          )}
+          {!bs.mode && (
+            <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={() => { setPresetMerge(null); openMerge() }}>合并同名</Button>
+          )}
+          {!bs.mode && <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>}
+        </Group>
+      </Group>
+      <TextInput
+        placeholder="按名称、职业、性格等搜索……"
+        value={query}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+        leftSection={<IconSearch size={14} />}
+      />
+      <CategoryTabs
+        kind="cc"
+        folders={ccFolders}
+        items={items}
+        active={cat}
+        onChange={setCat}
+        onNewFolder={() => { setCat('all'); openNewFolder() }}
+      />
+      <NewFolderModal opened={newFolderOpen} onClose={closeNewFolder} kind="cc" onCreated={(f) => setCat(f.id)} />
+      {bs.mode && (
+        <Grid columns={3} gutter="xs">
+          <Grid.Col span={1}>
+            <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
+          </Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
+          <Grid.Col span={1}><MoveFolderSelect kind="cc" folders={ccFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
+          <Grid.Col span={1}>
             <Button
               size="xs"
               variant="default"
-              leftSection={<IconGitMerge size={14} />}
               disabled={selectedIds.length < 2}
+              style={{ width: '100%' }}
               onClick={() => {
                 setPresetMerge(items.filter((c) => selectedIds.includes(c.id)))
                 openMerge()
               }}
             >
-              合并选中
+              合并人物卡
             </Button>
-            <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('cc', selectedIds); bs.clear() }}>删除</Button>
-            <Button size="xs" variant="subtle" onClick={() => { bs.setMode(false); bs.clear() }}>退出多选</Button>
-          </Group>
-        </Group>
-      ) : (
-        <Group justify="space-between">
-          <Text c="dimmed" size="sm">共 {items.length} 张人物卡{msg ? ` · ${msg}` : ''}</Text>
-          <Group gap={4}>
-            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
-            <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
-            <Tooltip label="选择人物卡 JSON 文件（导入合并）">
-              <label>
-                <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
-                <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
-              </label>
-            </Tooltip>
-            <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={() => { setPresetMerge(null); openMerge() }}>合并同名</Button>
-            <FolderManager kind="cc" />
-            <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>
-          </Group>
-        </Group>
+          </Grid.Col>
+          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={() => { void removeItems('cc', selectedIds); bs.clear() }}>删除所选</Button></Grid.Col>
+        </Grid>
       )}
       <Stack gap="xs">
-        {items.map((c) => (
+        {filtered.map((c) => (
           <Card
             key={c.id}
             withBorder
@@ -588,7 +745,7 @@ export function CharactersTab() {
             </Group>
           </Card>
         ))}
-        {items.length === 0 ? <Text c="dimmed" size="sm">还没有人物卡。</Text> : null}
+        {filtered.length === 0 ? <Text c="dimmed" size="sm">{items.length === 0 ? '还没有人物卡，点击右上角新建。' : '当前筛选条件下没有匹配的人物卡。'}</Text> : null}
       </Stack>
 
       <Modal opened={opened} onClose={close} title="编辑人物卡" size="lg">
