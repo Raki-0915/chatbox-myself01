@@ -11,6 +11,7 @@ import { Directory, Filesystem } from '@capacitor/filesystem'
 import { getLogger } from '@/lib/utils'
 import platform from '@/platform'
 import { AndroidDocumentSaver } from '@/platform/android_document_saver'
+import { CHATBOX_BUILD_PLATFORM } from '@/variables'
 import { characterCardsAtom, foldersAtom, modBackupsAtom, modLogAtom, modSettingsAtom, worldBooksAtom } from './store'
 
 const log = getLogger('mod-export')
@@ -74,6 +75,65 @@ export async function exportModData(filename = 'chatbox-mod-data.json'): Promise
     return r.canceled ? { ok: true } : { ok: r.ok, error: r.error }
   } catch (e) {
     log.error('exportModData failed', e)
+    return { ok: false, error: String((e as Error)?.message ?? e) }
+  }
+}
+
+/** 浏览器环境是否支持 File System Access API（可弹系统“另存为”，选文件名+目录） */
+function canUseSaveFilePicker(): boolean {
+  try {
+    return typeof window !== 'undefined' && typeof (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 带“编辑文件名 + 选择保存路径”的 JSON 导出。
+ * - Web 浏览器：优先 File System Access API（showSaveFilePicker）→ 弹出系统“另存为”对话框，可编辑文件名并选择保存目录；
+ *   浏览器不支持该 API 时回退为普通下载（文件名用传入值）。
+ * - Android / 桌面：复用 platform.exporter.exportBlob → SAF 系统保存对话框 / 桌面原生对话框，天然支持改文件名和选位置。
+ */
+export async function exportJsonWithPath(
+  defaultName: string,
+  blob: Blob,
+): Promise<{ ok: boolean; canceled?: boolean; error?: string }> {
+  const isWeb = CHATBOX_BUILD_PLATFORM === 'web'
+  if (isWeb && canUseSaveFilePicker()) {
+    try {
+      const w = window as unknown as {
+        showSaveFilePicker: (opts: {
+          suggestedName?: string
+          types?: Array<{ description?: string; accept: Record<string, string[]> }>
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>
+            close: () => Promise<void>
+          }>
+        }>
+      }
+      const handle = await w.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{ description: 'JSON 文件', accept: { 'application/json': ['.json'] } }],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+      return { ok: true }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') return { ok: true, canceled: true } // 用户取消另存为
+      // 其他错误：回退到平台默认导出
+    }
+  }
+  // Android：走原生 DocumentSaver（SAF 系统「保存到」对话框，用户自选目录与文件名）
+  if (Capacitor.getPlatform() === 'android') {
+    return exportBlobWithPicker(defaultName, blob)
+  }
+  try {
+    await platform.exporter.exportBlob(defaultName, blob, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    log.error('exportJsonWithPath failed', e)
     return { ok: false, error: String((e as Error)?.message ?? e) }
   }
 }
