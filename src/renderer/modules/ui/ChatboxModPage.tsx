@@ -80,7 +80,7 @@ export function ChatboxModPage() {
           <Tabs.Tab value="characters" leftSection={<IconUsers size={16} />}>人物卡</Tabs.Tab>
           <Tabs.Tab value="binding" leftSection={<IconRobot size={16} />}>会话装载</Tabs.Tab>
           <Tabs.Tab value="auto" leftSection={<IconRefresh size={16} />}>自动更新</Tabs.Tab>
-          <Tabs.Tab value="novel" leftSection={<IconWand size={16} />}>小说分章</Tabs.Tab>
+          <Tabs.Tab value="novel" leftSection={<IconWand size={16} />}>小说续写</Tabs.Tab>
           <Tabs.Tab value="settings" leftSection={<IconSettings size={16} />}>设置/导出</Tabs.Tab>
         </Tabs.List>
         <Box p="md" style={{ overflow: 'auto', height: '100%' }}>
@@ -1289,7 +1289,7 @@ function LogViewer({ limit = 100 }: { limit?: number }) {
   )
 }
 
-/* ======================== 小说分章 ======================== */
+/* ======================== 小说续写 ======================== */
 
 function NovelTab() {
   const sessionId = useAtomValue(currentSessionIdAtom)
@@ -1298,6 +1298,8 @@ function NovelTab() {
   const [plans, setPlans] = useState<RewritePlan[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  // 续写要求（可选）：下一章要写到哪 / 什么情节
+  const [extra, setExtra] = useState('')
 
   const doSplit = () => {
     const parts = splitChapters(text)
@@ -1366,15 +1368,16 @@ function NovelTab() {
       return
     }
     setBusy(true)
-    setMsg('正在续写…')
+    setMsg(extra.trim() ? '正在按续写要求续写…' : '正在续写…')
     try {
       const { getSessionSettings } = await import('@/stores/session/session-settings')
       const settings = await getSessionSettings(sessionId)
       const last = chapters.at(-1)
       const context = chapters.map((c) => `【${c.title}】${c.content}`).join('\n').slice(-8000)
-      const out = await v27Continue(settings, context, '')
+      const out = await v27Continue(settings, context, extra.trim())
       setChapters([...chapters, { title: `第${cn(chapters.length + 1)}章（续）`, content: out }])
-      setMsg('续写完成')
+      setExtra('')
+      setMsg('续写完成（已追加一章，可继续续写或推入小说会话）')
     } catch (e) {
       setMsg(`失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -1384,17 +1387,29 @@ function NovelTab() {
 
   return (
     <Stack gap="md">
-      <Alert variant="light" title="小说分章 / 续写">
-        粘贴正文 → 自动切章 → 生成 3 个改写方案 → 按方案重写末章 → 推入小说会话。续写可直接追加新章。
+      <Alert variant="light" title="小说续写">
+        粘贴正文 → 切章 → 预览 → <b>续写一章</b>（可填续写要求：写到哪/什么情节）→ 推入小说会话。改写末章（生成方案）为高级选项，保留在下方。
       </Alert>
       <Textarea label="正文（支持 第X章/Chapter N/楔子/番外 等标题切分）" autosize minRows={8} value={text} onChange={(e) => setText(e.currentTarget.value)} />
-      <Group>
-        <Button size="xs" onClick={doSplit}>切章</Button>
-        <Button size="xs" variant="default" onClick={() => void genPlans()} loading={busy} disabled={chapters.length === 0}>生成改写方案</Button>
-        <Button size="xs" variant="default" onClick={() => void doContinue()} loading={busy} disabled={chapters.length === 0}>续写一章</Button>
-        <Button size="xs" color="teal" onClick={() => void pushToSession()} loading={busy} disabled={chapters.length === 0}>推入小说会话</Button>
+      <Group grow>
+        <Button size="xs" variant="default" onClick={doSplit}>切章</Button>
+        <Button size="xs" color="teal" onClick={() => void doContinue()} loading={busy} disabled={chapters.length === 0}>续写一章</Button>
+        <Button size="xs" color="brand" onClick={() => void pushToSession()} loading={busy} disabled={chapters.length === 0}>推入小说会话</Button>
       </Group>
+      <TextInput
+        size="xs"
+        label="续写要求（可选）"
+        placeholder="如：这一章写到主角抵达长安城，并引出镇魔司内鬼线索"
+        value={extra}
+        onChange={(e) => setExtra(e.currentTarget.value)}
+        disabled={chapters.length === 0}
+      />
       {msg ? <Text size="sm">{msg}</Text> : null}
+      <Divider label="高级：改写末章（生成方案）" labelPosition="left" />
+      <Group>
+        <Button size="xs" variant="default" onClick={() => void genPlans()} loading={busy} disabled={chapters.length === 0}>生成改写方案</Button>
+        <Text size="xs" c="dimmed">为末章生成 3 个后续走向方案，点方案即可按它重写末章。</Text>
+      </Group>
       {plans.map((p) => (
         <Card key={p.index} withBorder padding="sm">
           <Group justify="space-between">
