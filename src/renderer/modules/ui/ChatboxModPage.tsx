@@ -68,6 +68,7 @@ import { buildExportPayload, importModData } from '../export'
 import { ExportModal, type ExportModalConfig } from './ExportModal'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
+import { MOD_BUILD } from '../version'
 
 export function ChatboxModPage() {
   return (
@@ -1479,6 +1480,10 @@ function SettingsTab() {
         description="导出世界书 / 人物卡 / 设置 / 日志 / 备份的完整 JSON。可修改导出文件名；点击导出后按系统提示选择保存到指定位置。"
         onDone={(_ok, m) => setRestoreResult(m)}
       />
+      <Divider label="关于" labelPosition="left" />
+      <Text size="xs" c="dimmed">
+        Chatbox Mod fork · 版本：{MOD_BUILD}
+      </Text>
     </Stack>
   )
 }

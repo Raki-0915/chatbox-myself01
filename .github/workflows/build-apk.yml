@@ -30,6 +30,12 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
 
+      - name: Inject mod build version
+        run: |
+          VER="fork版_$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          sed -i "s/__MOD_BUILD__/${VER}/" src/renderer/modules/version.ts
+          grep -n "MOD_BUILD" src/renderer/modules/version.ts
+
       - name: Build renderer (mobile target)
         env:
           NODE_OPTIONS: "--max-old-space-size=6144"
