@@ -7,7 +7,7 @@
  */
 import { getDefaultStore } from 'jotai'
 import { Capacitor } from '@capacitor/core'
-import { Directory, Filesystem } from '@capacitor/filesystem'
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
 import { getLogger } from '@/lib/utils'
 import platform from '@/platform'
 import { AndroidDocumentSaver } from '@/platform/android_document_saver'
@@ -50,7 +50,8 @@ export async function exportBlobWithPicker(filename: string, blob: Blob): Promis
     if (Capacitor.getPlatform() === 'android') {
       const data = await blob.text()
       const cachePath = `mod-exports/${filename}`
-      const w = await Filesystem.writeFile({ path: cachePath, data, directory: Directory.Cache, recursive: true })
+      // 必须显式 UTF8 编码写文本，否则 Android 端按 base64 解码报 bad base-64
+      const w = await Filesystem.writeFile({ path: cachePath, data, directory: Directory.Cache, recursive: true, encoding: Encoding.UTF8 })
       // SAF 系统保存对话框：用户自选目录与文件名
       await AndroidDocumentSaver.saveFile({ sourceUri: w.uri, suggestedName: filename, mimeType: 'application/json' })
       await Filesystem.deleteFile({ path: cachePath, directory: Directory.Cache }).catch(() => undefined)
