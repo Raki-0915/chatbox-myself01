@@ -116,6 +116,62 @@ function useBatchSelect<T extends { id: string }>(items: T[]) {
   return { mode, setMode, sel, setSel, toggle, clear }
 }
 
+/** 移动到文件夹下拉（含「＋新建文件夹」内联入口） */
+function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; folders: ModFolder[]; ids: string[]; onMoved: () => void }) {
+  const [newOpen, { open: openNew, close: closeNew }] = useDisclosure(false)
+  const [newName, setNewName] = useState('')
+  return (
+    <>
+      <Select
+        placeholder="移动到文件夹"
+        clearable
+        size="xs"
+        data={[
+          ...folders.map((f) => ({ value: f.id, label: f.name })),
+          { value: '__new__', label: '＋ 新建文件夹…' },
+        ]}
+        onChange={(v) => {
+          if (v === '__new__') {
+            setNewName('')
+            openNew()
+            return
+          }
+          if (ids.length) void moveItemsToFolder(kind, ids, v ?? undefined)
+          onMoved()
+        }}
+        style={{ minWidth: 150 }}
+      />
+      <Modal opened={newOpen} onClose={closeNew} title="新建文件夹并移动" size="sm">
+        <Stack gap="sm">
+          <TextInput
+            placeholder="文件夹名称"
+            value={newName}
+            onChange={(e) => setNewName(e.currentTarget.value)}
+            data-autofocus
+          />
+          <Group justify="flex-end">
+            <Button variant="subtle" size="xs" onClick={closeNew}>取消</Button>
+            <Button
+              size="xs"
+              disabled={!newName.trim()}
+              onClick={async () => {
+                if (!newName.trim()) return
+                const folder: ModFolder = { id: uuidv4(), name: newName.trim(), kind }
+                await upsertFolder(folder)
+                if (ids.length) await moveItemsToFolder(kind, ids, folder.id)
+                closeNew()
+                onMoved()
+              }}
+            >
+              创建并移动
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
+  )
+}
+
 /** 导出条目列表为 JSON 文件（复用官方 exporter） */
 async function exportEntriesJson(filename: string, entries: unknown[]): Promise<{ ok: boolean; error?: string }> {
   try {
@@ -222,17 +278,7 @@ export function WorldBooksTab() {
         <Group justify="space-between" wrap="wrap">
           <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 条</Text>
           <Group gap={4} wrap="wrap">
-            <Select
-              placeholder="移动到文件夹"
-              clearable
-              size="xs"
-              data={wbFolders.map((f) => ({ value: f.id, label: f.name }))}
-              onChange={(v) => {
-                if (selectedIds.length) void moveItemsToFolder('wb', selectedIds, v ?? undefined)
-                bs.clear()
-              }}
-              style={{ minWidth: 150 }}
-            />
+            <MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} />
             <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用</Button>
             <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>停用</Button>
             <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('wb', selectedIds); bs.clear() }}>删除</Button>
@@ -383,6 +429,7 @@ export function CharactersTab() {
   const [msg, setMsg] = useState('')
   const [importing, setImporting] = useState(false)
   const [mergeOpen, { open: openMerge, close: closeMerge }] = useDisclosure(false)
+  const [presetMerge, setPresetMerge] = useState<CharacterCard[] | null>(null)
   const folders = useAtomValue(foldersAtom)
   const ccFolders = folders.filter((f) => f.kind === 'cc')
   const bs = useBatchSelect(items)
@@ -456,19 +503,21 @@ export function CharactersTab() {
         <Group justify="space-between" wrap="wrap">
           <Text c="dimmed" size="sm">已选 {bs.sel.size}/{items.length} 张</Text>
           <Group gap={4} wrap="wrap">
-            <Select
-              placeholder="移动到文件夹"
-              clearable
-              size="xs"
-              data={ccFolders.map((f) => ({ value: f.id, label: f.name }))}
-              onChange={(v) => {
-                if (selectedIds.length) void moveItemsToFolder('cc', selectedIds, v ?? undefined)
-                bs.clear()
-              }}
-              style={{ minWidth: 150 }}
-            />
+            <MoveFolderSelect kind="cc" folders={ccFolders} ids={selectedIds} onMoved={() => bs.clear()} />
             <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用</Button>
             <Button size="xs" variant="default" onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>停用</Button>
+            <Button
+              size="xs"
+              variant="default"
+              leftSection={<IconGitMerge size={14} />}
+              disabled={selectedIds.length < 2}
+              onClick={() => {
+                setPresetMerge(items.filter((c) => selectedIds.includes(c.id)))
+                openMerge()
+              }}
+            >
+              合并选中
+            </Button>
             <Button size="xs" color="red" variant="subtle" onClick={() => { void removeItems('cc', selectedIds); bs.clear() }}>删除</Button>
             <Button size="xs" variant="subtle" onClick={() => { bs.setMode(false); bs.clear() }}>退出多选</Button>
           </Group>
@@ -485,7 +534,7 @@ export function CharactersTab() {
                 <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
               </label>
             </Tooltip>
-            <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={openMerge}>合并同名</Button>
+            <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={() => { setPresetMerge(null); openMerge() }}>合并同名</Button>
             <FolderManager kind="cc" />
             <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>
           </Group>
@@ -502,17 +551,31 @@ export function CharactersTab() {
           >
             <Group justify="space-between" wrap="nowrap">
               {bs.mode && <Checkbox checked={bs.sel.has(c.id)} onChange={() => bs.toggle(c.id)} aria-label={c.name} size="sm" />}
-              <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                <Group gap="xs">
+              <Stack gap={3} style={{ flex: 1, minWidth: 0 }}>
+                {/* 行1：姓名 + 职业 + 文件夹 */}
+                <Group gap="xs" wrap="wrap">
                   <Text fw={600} size="sm">{c.name}</Text>
-                  {c.age ? <Text size="xs" c="dimmed">{c.age}岁</Text> : null}
-                  {c.gender ? <Text size="xs" c="dimmed">{c.gender}</Text> : null}
-                  {c.occupation ? <Badge size="xs" variant="outline">{c.occupation}</Badge> : null}
+                  {c.occupation ? <Badge size="xs" variant="light" color="blue">{c.occupation}</Badge> : null}
                   {c.folderId ? <Badge size="xs" variant="outline">{ccFolders.find((f) => f.id === c.folderId)?.name ?? '未知'}</Badge> : null}
                 </Group>
-                <Text size="xs" c="dimmed" lineClamp={2}>{c.backgroundStory}</Text>
+                {/* 行2：基础属性小标签 */}
+                <Group gap={4} wrap="wrap">
+                  {c.age ? <Badge size="xs" variant="default" radius="sm">{c.age}</Badge> : null}
+                  {c.gender ? <Badge size="xs" variant="default" radius="sm">{c.gender}</Badge> : null}
+                  {c.height ? <Badge size="xs" variant="default" radius="sm">{c.height}</Badge> : null}
+                  {c.weight ? <Badge size="xs" variant="default" radius="sm">{c.weight}</Badge> : null}
+                  {c.personalityType ? <Badge size="xs" variant="default" radius="sm" color="violet">{c.personalityType}</Badge> : null}
+                </Group>
+                <Text size="xs" c="dimmed" lineClamp={2}>{c.backgroundStory || '（暂无背景故事）'}</Text>
                 {c.relationships.length > 0 ? (
-                  <Text size="xs" c="gray">关系：{c.relationships.map((r) => `${r.targetName}(${r.relation})`).join('、')}</Text>
+                  <Group gap={4} wrap="wrap">
+                    {c.relationships.slice(0, 3).map((r, i) => (
+                      <Badge key={i} size="xs" variant="filled" color="gray" radius="sm">
+                        {r.targetName} · {r.relation}
+                      </Badge>
+                    ))}
+                    {c.relationships.length > 3 ? <Text size="xs" c="dimmed">+{c.relationships.length - 3} 更多</Text> : null}
+                  </Group>
                 ) : null}
               </Stack>
               {!bs.mode && (
@@ -536,7 +599,13 @@ export function CharactersTab() {
         </Group>
       </Modal>
 
-      <MergeCardsModal items={items} opened={mergeOpen} onClose={closeMerge} folderNameOf={(id) => ccFolders.find((f) => f.id === id)?.name} />
+      <MergeCardsModal
+        items={items}
+        presetCards={presetMerge}
+        opened={mergeOpen}
+        onClose={() => { closeMerge(); setPresetMerge(null) }}
+        folderNameOf={(id) => ccFolders.find((f) => f.id === id)?.name}
+      />
     </Stack>
   )
 }
@@ -561,19 +630,24 @@ interface MergeConflict {
 
 function MergeCardsModal(props: {
   items: CharacterCard[]
+  /** 传入则进入「合并选中卡」模式（跳过同名分组选择，直接以该列表为合并组） */
+  presetCards?: CharacterCard[] | null
   opened: boolean
   onClose: () => void
   folderNameOf: (id?: string) => string | undefined
 }) {
-  const { items, opened, onClose, folderNameOf } = props
+  const { items, opened, onClose, folderNameOf, presetCards } = props
   const [groupIdx, setGroupIdx] = useState(0)
   const [choice, setChoice] = useState<Record<string, number | 'merge'>>({})
   const [deleteOld, setDeleteOld] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  // 同名分组（名字完全相同的组，≥2 张）
+  // 同名分组（名字完全相同的组，≥2 张）；合并选中模式不分组
   const groups = useMemo(() => {
+    if (presetCards && presetCards.length > 1) {
+      return [{ name: presetCards[0].name || '选中人物卡', cards: presetCards }]
+    }
     const m = new Map<string, CharacterCard[]>()
     for (const c of items) {
       const k = c.name.trim()
@@ -585,7 +659,7 @@ function MergeCardsModal(props: {
     return [...m.entries()]
       .filter(([, g]) => g.length > 1)
       .map(([name, cards]) => ({ name, cards }))
-  }, [items])
+  }, [items, presetCards])
 
   const group = groups[groupIdx] ?? null
 
@@ -661,18 +735,22 @@ function MergeCardsModal(props: {
     }
   }
 
+  const isPreset = !!(presetCards && presetCards.length > 1)
+
   return (
-    <Modal opened={opened} onClose={() => { onClose(); setGroupIdx(0); setChoice({}) }} title={`合并同名人物卡（${groups.length} 组）`} size="lg">
+    <Modal opened={opened} onClose={() => { onClose(); setGroupIdx(0); setChoice({}) }} title={isPreset ? `合并选中人物卡（${groups[0]?.cards.length ?? 0} 张）` : `合并同名人物卡（${groups.length} 组）`} size="lg">
       {groups.length === 0 ? (
-        <Text c="dimmed" size="sm">没有同名人物卡。合并会按「姓名完全相同」检索，先复制或新建同名卡再合并。</Text>
+        <Text c="dimmed" size="sm">没有可合并的人物卡。同名模式按「姓名完全相同」检索；多选模式请先勾选 ≥2 张卡再点「合并选中」。</Text>
       ) : (
         <Stack gap="sm">
-          <Select
-            label="同名组合"
-            data={groups.map((g, i) => ({ value: String(i), label: `${g.name}（${g.cards.length} 张）` }))}
-            value={String(groupIdx)}
-            onChange={(v) => { setGroupIdx(Number(v) || 0); setChoice({}) }}
-          />
+          {!isPreset && (
+            <Select
+              label="同名组合"
+              data={groups.map((g, i) => ({ value: String(i), label: `${g.name}（${g.cards.length} 张）` }))}
+              value={String(groupIdx)}
+              onChange={(v) => { setGroupIdx(Number(v) || 0); setChoice({}) }}
+            />
+          )}
           {group && (
             <>
               <Text size="xs" c="dimmed">
@@ -742,6 +820,8 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
   const set = (patch: Partial<CharacterCard>) => onChange({ ...card, ...patch })
   return (
     <Stack gap="sm">
+      {/* 基本信息 */}
+      <Divider label="基本信息" labelPosition="left" />
       <Group grow>
         <TextInput label="姓名" value={card.name} onChange={(e) => set({ name: e.currentTarget.value })} />
         <TextInput label="年龄" value={card.age} onChange={(e) => set({ age: e.currentTarget.value })} />
@@ -752,7 +832,10 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         <TextInput label="身高" value={card.height} onChange={(e) => set({ height: e.currentTarget.value })} />
         <TextInput label="体重" value={card.weight} onChange={(e) => set({ weight: e.currentTarget.value })} />
       </Group>
+      {/* 外貌与性格 */}
+      <Divider label="外貌与性格" labelPosition="left" />
       <Textarea label="外貌" autosize minRows={2} value={card.appearance} onChange={(e) => set({ appearance: e.currentTarget.value })} />
+      <Textarea label="显著特征" autosize minRows={2} value={card.distinguishingFeatures} onChange={(e) => set({ distinguishingFeatures: e.currentTarget.value })} />
       <Textarea label="性格类型" autosize minRows={2} value={card.personalityType} onChange={(e) => set({ personalityType: e.currentTarget.value })} />
       <Group grow>
         <Textarea label="优点" autosize minRows={2} value={card.strengths} onChange={(e) => set({ strengths: e.currentTarget.value })} />
@@ -760,7 +843,8 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       </Group>
       <Textarea label="爱好" autosize minRows={2} value={card.hobbies} onChange={(e) => set({ hobbies: e.currentTarget.value })} />
       <Textarea label="背景故事" autosize minRows={4} value={card.backgroundStory} onChange={(e) => set({ backgroundStory: e.currentTarget.value })} />
-      <Divider label="关系" />
+      {/* 关系 */}
+      <Divider label="关系" labelPosition="left" />
       {card.relationships.map((r, i) => (
         <Group key={i} grow>
           <TextInput placeholder="对象" value={r.targetName} onChange={(e) => set({ relationships: card.relationships.map((x, j) => (j === i ? { ...x, targetName: e.currentTarget.value } : x)) })} />
@@ -769,7 +853,8 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         </Group>
       ))}
       <Button size="compact-xs" variant="subtle" onClick={() => set({ relationships: [...card.relationships, { targetName: '', relation: '' }] })}>+ 添加关系</Button>
-      <Divider label="自定义属性" />
+      {/* 自定义属性 */}
+      <Divider label="自定义属性" labelPosition="left" />
       {card.customAttributes.map((a, i) => (
         <Group key={i} grow>
           <TextInput placeholder="属性名" value={a.key} onChange={(e) => set({ customAttributes: card.customAttributes.map((x, j) => (j === i ? { ...x, key: e.currentTarget.value } : x)) })} />
@@ -778,6 +863,8 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         </Group>
       ))}
       <Button size="compact-xs" variant="subtle" onClick={() => set({ customAttributes: [...card.customAttributes, { key: '', value: '' }] })}>+ 添加属性</Button>
+      {/* 归属 */}
+      <Divider label="归属" labelPosition="left" />
       <Select
         label="文件夹"
         placeholder="无"
@@ -788,7 +875,7 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       />
       {card.versionHistory.length > 1 && (
         <>
-          <Divider label="版本历史（最近 20 份）" />
+          <Divider label="版本历史（最近 20 份）" labelPosition="left" />
           <Group>
             <Select
               label="恢复到版本"
