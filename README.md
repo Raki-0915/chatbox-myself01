@@ -1,3 +1,132 @@
+# Chatbox Mod（世界书增强版）
+
+> 基于官方 Chatbox v1.23.5（AGPL-3.0）Fork 的个人自用改造版，新增世界书 / 人物卡 / 小说分章续写 / 自动剧情更新等功能。
+> **本文件是项目工作流程与协作规则文档，接手本仓库的 AI（或开发者）请先完整阅读本节，再往下看官方说明。**
+
+---
+
+## 一、这是什么
+
+| 项 | 值 |
+|---|---|
+| 基座 | 官方 Chatbox v1.23.5（github.com/chatboxai/chatbox） |
+| 包名 | `xyz.chatboxapp.chatbox` |
+| 功能 | 世界书、人物卡、小说分章/续写、自动剧情更新、v48 数据迁移、管理界面 |
+| 形态 | Capacitor 混合 App（Android APK / web / 桌面） |
+| 目标 | **个人自用、长期迭代**，不指望官方出这些功能 |
+
+## 二、代码结构（改动都在哪）
+
+```
+src/renderer/modules/          ★ 全部自研功能（TS 源码，可读可改）
+├── types.ts                  领域类型（WorldBookEntry / CharacterCard / ModFolder）
+├── storage.ts                官方存储键封装
+├── store.ts                  数据 CRUD / 备份 / 日志 / 设置（Jotai atoms）
+├── prompt.ts                 世界书/人物卡提示词注入（命中规则）
+├── session.ts                会话级绑定（settings.worldBookIds / characterCardIds）
+├── analyze.ts                长文分析（分块→提取→合并）
+├── auto-update.ts            自动剧情更新（响应式订阅，非轮询）
+├── novel.ts                  小说分章/续写
+├── export.ts                 导出（官方 exporter）
+├── migration.ts              v48 localStorage 数据一键迁移（幂等）
+├── index.ts                  运行时入口（initChatboxMod）
+└── ui/ChatboxModPage.tsx     管理界面（/settings/mod，6 Tab）
+
+官方源码侵入点（仅 3 处，均带 [Chatbox Mod] 注释，勿删）：
+1. packages/chatbox-core/src/domain/settings/settings-schema.ts  → SessionSettingsSchema 增加 worldBookIds / characterCardIds（zod .optional().catch(undefined)）
+2. src/renderer/stores/session/agent-harness.ts                → instructions 组装链上插入世界书/人物卡注入段（动态 import）
+3. src/renderer/index.tsx + routes/settings/route.tsx          → 模块初始化 + 设置页导航项
+
+android/                        Capacitor Android 工程（含 keystore/ 签名密钥）
+.github/workflows/build-apk.yml  CI：构建→签名→发布 Release
+capacitor.config.ts              appId / webDir 等
+electron.vite.config.ts          已调低内存占用（sourcemap/gzipSize 关闭）
+```
+
+## 三、开发工作流程（核心规则）
+
+### 3.1 改动范围
+- 新增/修改功能：**只改 `src/renderer/modules/`**（自己的一亩三分地）
+- 需要接入官方机制（存储/提示词/会话/UI）：改 3 个官方侵入点，**必须保留 `[Chatbox Mod]` 注释**
+- **不要**改动官方其他代码，不要重排官方结构
+
+### 3.2 编码规范
+- 语言：TypeScript（严格模式），**提交前必须 tsc 通过（0 错误）**
+  ```bash
+  node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit
+  ```
+- 数据读写一律走官方存储后端（`storage.ts` 封装），**禁止**直接 localStorage（5MB 上限）
+- 提示词注入走 `prompt.ts` / `agent-harness.ts` 官方组装链，禁止在 bundle 外打补丁
+- 关键逻辑加中文注释，注释占比不低于 15%
+
+### 3.3 提交规范
+- commit message 格式：`类型: 中文描述`（类型：feat / fix / refactor / docs / ci / perf）
+- 示例：`feat: 世界书支持按关键词命中注入`、`fix: 分章正则匹配第X章失败`
+- **每轮改动聚焦 1-3 个相关需求**（验证成本低、出问题好定位），不要一次堆十几个改动
+- 提交前检查：`git status` 确认没有误改官方代码、没有误提交敏感文件
+
+### 3.4 发布流程（push 即发布）
+```bash
+git add -A && git commit -m "feat: ..." && git push origin main
+```
+push 后 GitHub Actions 自动执行：
+1. `pnpm install --frozen-lockfile`
+2. 构建 renderer（mobile_app / android 目标）
+3. `cap sync android` + 注入 edge-to-edge 退出（防状态栏遮挡）
+4. `gradle assembleRelease`
+5. **自动签名**（`android/keystore/chatbox-mod.keystore`，密码见下）
+6. **自动发布 GitHub Release**：版本 `v<序号>`，body 自动汇总本次 commits（changelog）+ 安装说明
+
+约 15-20 分钟后，在仓库 **Releases** 页面即可下载签名版 `chatbox-mod.apk`，**直接安装、可覆盖升级**。
+
+## 四、签名密钥（红线）
+
+| 项 | 值 |
+|---|---|
+| 文件 | `android/keystore/chatbox-mod.keystore`（仓库内） |
+| keystore 密码 | `chatbox123` |
+| 别名 | `chatbox-mod` |
+| 别名密码 | `chatbox123` |
+| 证书指纹 | SHA256 `aa46319b85dc12aef993892fd4287af00951280ea0ee904ee8c716bbccd6ffaf` |
+
+**规则**：
+- **必须始终用这把密钥签名**，换密钥 = 用户无法覆盖安装 = 数据丢失
+- 签名指纹必须保持 `aa46319b...`，每次发布验证一次（CI 已内置 verify）
+- 密钥已进公开仓库（个人自用场景可接受）；若仓库要公开给他人，先把密钥迁到 GitHub Secrets
+
+## 五、已知约束与注意事项
+
+1. **内存受限环境**：构建 renderer 需 `NODE_OPTIONS="--max-old-space-size=2560"`（3.9GB 内存沙箱）；CI 用 6144
+2. **Android 15 edge-to-edge**：`values-v35/styles.xml` 已退出强制，勿删；`cap sync` 后会覆盖 Manifest，CI 里有注入步骤兜底
+3. **AGPL-3.0**：个人自用无影响；公开分发需开源改动（仓库公开即满足）
+4. **v48 数据迁移**：`migration.ts` 负责把旧版 localStorage 数据迁入官方存储，改动数据 schema 时必须同步改迁移逻辑（保持幂等）
+5. **官方升级**：官方新版本可 `git fetch upstream && git merge`，冲突通常集中在 3 个侵入点
+
+## 六、常见命令速查
+
+```bash
+# 类型检查
+node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit
+# 本地构建 renderer（android 目标）
+NODE_OPTIONS="--max-old-space-size=2560" CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android CHATBOX_ELECTRON_VITE_TARGET=renderer npx electron-vite build
+# 同步 android 工程
+npx cap sync android
+# 打包
+cd android && ./gradlew assembleRelease --no-daemon
+# web 预览调试（改 UI 最快）
+pnpm dev:web
+# 手动签名（CI 已自动，本地需要时）
+BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+"$BT/zipalign" -f 4 app.apk aligned.apk
+"$BT/apksigner" sign --ks android/keystore/chatbox-mod.keystore --ks-key-alias chatbox-mod --ks-pass pass:chatbox123 --key-pass pass:chatbox123 --out out.apk aligned.apk
+```
+
+---
+---
+**以下是官方 Chatbox 原始 README（保留备查）**
+
+---
+
 <p align="right">
   <a href="README.md">English</a> |
   <a href="./doc/README-CN.md">简体中文</a>
