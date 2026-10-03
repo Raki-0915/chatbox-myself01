@@ -127,14 +127,22 @@ async function exportEntriesJson(filename: string, entries: unknown[]): Promise<
   }
 }
 
-/** 读取导入文件并解析为数组 */
+/** 读取导入文件并解析为条目数组（兼容 3 种格式：条目数组 / 单条对象 / {worldBooks|characterCards:[...]} 导出包） */
 function readJsonArrayFile(file: File): Promise<unknown[]> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onload = () => {
       try {
         const parsed = JSON.parse(String(r.result))
-        resolve(Array.isArray(parsed) ? parsed : [])
+        if (Array.isArray(parsed)) return resolve(parsed)
+        if (parsed && typeof parsed === 'object') {
+          const obj = parsed as Record<string, unknown>
+          if (Array.isArray(obj.characterCards)) return resolve(obj.characterCards)
+          if (Array.isArray(obj.worldBooks)) return resolve(obj.worldBooks)
+          // 单条对象（如单张人物卡 { name: "罗素", ... }）
+          if (typeof obj.name === 'string') return resolve([obj])
+        }
+        resolve([])
       } catch (e) {
         reject(e)
       }
@@ -198,7 +206,7 @@ export function WorldBooksTab() {
         })
         n++
       }
-      setMsg(`导入完成：${n} 条世界书`)
+      setMsg(arr.length === 0 ? '导入 0 条：文件中没有可识别的世界书（支持数组 / 单条 / 导出包格式）' : `导入完成：${n} 条世界书`)
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -432,7 +440,7 @@ export function CharactersTab() {
         await addOrUpdateCharacterCard(card)
         n++
       }
-      setMsg(`导入完成：${n} 张人物卡`)
+      setMsg(arr.length === 0 ? '导入 0 张：文件中没有可识别的人物卡（支持数组 / 单卡 / 导出包格式）' : `导入完成：${n} 张人物卡`)
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
