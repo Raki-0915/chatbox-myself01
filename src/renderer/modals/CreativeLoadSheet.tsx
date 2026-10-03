@@ -126,6 +126,8 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
   const [wbSel, setWbSel] = useState<string[]>([])
   const [ccSel, setCcSel] = useState<string[]>([])
   const [auto, setAuto] = useState<boolean>(modSettings.autoUpdateEnabled)
+  // 顶部并排标签：当前激活的页签（'wb' 世界书 / 'cc' 人物卡）
+  const [tab, setTab] = useState<'wb' | 'cc'>('wb')
 
   // 打开时读取当前会话的装载状态（自动更新为对话级：会话有设置用会话值，否则回退全局）
   useEffect(() => {
@@ -207,32 +209,74 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
           <Text size="xs" c="dimmed" mt={4}>
             仅显示「设置页已启用」的条目；勾选后装载到<b>当前对话</b>，其他对话不受影响。
           </Text>
+
+          {/* 顶部并排标签：世界书 / 人物卡，点击切换下方内容 */}
+          <Flex gap={8} pt="xs">
+            {(
+              [
+                { key: 'wb', label: '世界书', count: wbSel.length, icon: <IconBook2 size={15} /> },
+                { key: 'cc', label: '人物卡', count: ccSel.length, icon: <IconUsers size={15} /> },
+              ] as { key: 'wb' | 'cc'; label: string; count: number; icon: React.ReactNode }[]
+            ).map(({ key, label, count, icon }) => {
+              const active = tab === key
+              return (
+                <UnstyledButton
+                  key={key}
+                  onClick={() => setTab(key)}
+                  aria-pressed={active}
+                  style={{
+                    flex: 1,
+                    padding: '8px 0',
+                    borderRadius: 10,
+                    textAlign: 'center',
+                    background: active ? 'var(--chatbox-background-brand-secondary, #f0fdf4)' : 'transparent',
+                    color: active ? 'var(--chatbox-brand-color, #2563eb)' : 'var(--chatbox-text-secondary, #6b7280)',
+                    fontWeight: active ? 700 : 600,
+                    fontSize: 14,
+                    border: active ? '1.5px solid var(--chatbox-brand-color, #2563eb)' : '1px solid var(--chatbox-border-primary, #e5e7eb)',
+                    transition: 'background .15s ease, color .15s ease',
+                  }}
+                >
+                  <Group gap={6} justify="center">
+                    {icon}
+                    <Text inherit>{label}</Text>
+                    <Text size="xs" c="dimmed">
+                      ({count})
+                    </Text>
+                  </Group>
+                </UnstyledButton>
+              )
+            })}
+          </Flex>
         </Box>
 
         {/* 内容 */}
         <ScrollArea.Autosize mah="62vh" type="auto" offsetScrollbars>
           <Stack px="md" py="sm" gap="md">
-            <SheetSection
-              icon={<IconBook2 size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
-              title="世界书"
-              enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}` }))}
-              disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发' }))}
-              selected={wbSel}
-              onToggle={toggleWb}
-              onGoEnable={goEnable}
-              accent="#059669"
-            />
-            <Divider />
-            <SheetSection
-              icon={<IconUsers size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
-              title="人物卡"
-              enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}` }))}
-              disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业' }))}
-              selected={ccSel}
-              onToggle={toggleCc}
-              onGoEnable={goEnable}
-              accent="#059669"
-            />
+            {/* 按顶部标签切换：世界书 或 人物卡 */}
+            {tab === 'wb' ? (
+              <SheetSection
+                icon={<IconBook2 size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
+                title="世界书"
+                enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}` }))}
+                disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发' }))}
+                selected={wbSel}
+                onToggle={toggleWb}
+                onGoEnable={goEnable}
+                accent="#059669"
+              />
+            ) : (
+              <SheetSection
+                icon={<IconUsers size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
+                title="人物卡"
+                enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}` }))}
+                disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业' }))}
+                selected={ccSel}
+                onToggle={toggleCc}
+                onGoEnable={goEnable}
+                accent="#059669"
+              />
+            )}
             <Divider />
             {/* 自动更新 */}
             <Group justify="space-between" align="flex-start" px="xs" py="xs">
