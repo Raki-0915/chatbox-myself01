@@ -21,6 +21,8 @@ export interface WorldBookEntry {
   folderId?: string
   createdAt?: number
   updatedAt?: number
+  /** 版本历史（最近 20 份：自动更新/编辑覆盖前压入旧内容，可单条恢复） */
+  history?: Array<{ t: number; content: string }>
 }
 
 /** 人物卡关系 */

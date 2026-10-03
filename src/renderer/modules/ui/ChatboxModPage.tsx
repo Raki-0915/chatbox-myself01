@@ -52,6 +52,7 @@ import {
   removeWorldBook,
   restoreCharacterCardVersion,
   restoreModBackup,
+  restoreWorldBookVersion,
   setItemsEnabled,
   toggleCharacterCard,
   toggleWorldBook,
@@ -490,6 +491,34 @@ export function WorldBooksTab() {
               <Button variant="subtle" onClick={close}>取消</Button>
               <Button onClick={() => void save()}>保存</Button>
             </Group>
+            {editing.history && editing.history.length > 0 ? (
+              <Box style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: 8, background: '#fafafa' }}>
+                <Text size="xs" fw={600} c="dimmed" mb={4}>历史版本（{editing.history.length}）— 恢复会覆盖当前内容，当前内容自动入历史</Text>
+                <Stack gap={4}>
+                  {[...editing.history].reverse().map((h, ri) => {
+                    const realIdx = editing.history!.length - 1 - ri
+                    return (
+                      <Group key={realIdx} gap={6} justify="space-between" wrap="nowrap">
+                        <Text size="xs" c="dimmed" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {new Date(h.t).toLocaleString()} · {h.content.replace(/\s+/g, ' ').slice(0, 36)}{h.content.length > 36 ? '…' : ''}
+                        </Text>
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          onClick={async () => {
+                            await restoreWorldBookVersion(editing.id, realIdx)
+                            setEditing((e) => (e ? { ...e, content: h.content } : e))
+                            setMsg('已恢复该历史版本')
+                          }}
+                        >
+                          恢复
+                        </Button>
+                      </Group>
+                    )
+                  })}
+                </Stack>
+              </Box>
+            ) : null}
           </Stack>
         )}
       </Modal>

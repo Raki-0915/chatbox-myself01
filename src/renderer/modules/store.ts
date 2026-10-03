@@ -71,7 +71,33 @@ export async function addOrUpdateWorldBook(entry: WorldBookEntry): Promise<void>
   const next =
     idx === -1
       ? [{ ...entry, createdAt: now, updatedAt: now }, ...list]
-      : list.map((x, i) => (i === idx ? { ...x, ...entry, updatedAt: now } : x))
+      : list.map((x, i) => {
+          if (i !== idx) return x
+          // 覆盖前把旧内容压入版本历史（截断保留最近 20 份），供单条恢复
+          const prev = x.content ?? ''
+          const history =
+            prev && prev !== String(entry.content ?? '')
+              ? [...(x.history ?? []), { t: now, content: prev }].slice(-20)
+              : x.history ?? []
+          return { ...x, ...entry, updatedAt: now, history }
+        })
+  store.set(worldBooksAtom, next)
+  await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
+}
+
+/** 恢复世界书历史版本（index 为 history 数组下标；恢复后该版本移出历史，最新内容进历史） */
+export async function restoreWorldBookVersion(id: string, index: number): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const list = store.get(worldBooksAtom)
+  const item = list.find((x) => x.id === id)
+  if (!item?.history?.[index]) return
+  const now = Date.now()
+  const target = item.history[index]
+  const history = [...item.history.filter((_, i) => i !== index), { t: now, content: item.content ?? '' }].slice(-20)
+  const next = list.map((x) =>
+    x.id === id ? { ...x, content: target.content, updatedAt: now, history } : x
+  )
   store.set(worldBooksAtom, next)
   await modSetItem(MOD_STORAGE_KEYS.worldBooks, next)
 }

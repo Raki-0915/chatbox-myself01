@@ -1,14 +1,19 @@
 /**
- * Chatbox Mod —— 自动更新预览确认弹窗（逐条勾选）
+ * Chatbox Mod —— 自动更新预览确认弹窗（逐条勾选 + 新旧对比）
  *
- * 模型算出的世界书/人物卡差异（新增/更新/删除）逐条列出，
+ * 模型算出的世界书/人物卡差异（新增/更新/删除）逐条列出：
+ * - 新增：新条目内容预览（人物卡展示完整字段）
+ * - 更新：「旧 → 新」对比，一眼看出这次会改/丢什么
+ * - 删除：红色标注将被删条目的内容摘要
  * 用户勾选要应用的条目，确认后返回「勾选后的差异 diff」；取消返回 null。
  * 注册名 'mod-update-preview'。
  */
 import { useMemo, useState } from 'react'
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
+import { getDefaultStore } from 'jotai'
 import { Badge, Box, Button, Checkbox, Divider, Group, Modal, Stack, Text } from '@mantine/core'
 import type { AutoUpdateDiff } from '../modules/auto-update'
+import { characterCardsAtom, worldBooksAtom } from '../modules/store'
 
 type Sel = { add: Set<number>; update: Set<number>; remove: Set<string> }
 type SelAll = { wb: Sel; cc: Sel }
@@ -21,9 +26,14 @@ function newSel(add: number, update: number, remove: string[]): Sel {
   }
 }
 
-/** 对象条目列表（新增/更新）：每条 checkbox + 名称 + 内容摘要 */
+function clip(s: string, n: number): string {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t.length > n ? t.slice(0, n) + '…' : t
+}
+
+/** 新增条目列表（世界书/人物卡通用）：每条 checkbox + 名称 + 内容摘要 */
 function PickEntryList({
-  title, color, items, getLabel, selected, onToggle,
+  title, color, items, getLabel, selected, onToggle, previewField,
 }: {
   title: string
   color: string
@@ -31,6 +41,7 @@ function PickEntryList({
   getLabel: (x: Record<string, unknown>) => string
   selected: Set<number>
   onToggle: (idx: number) => void
+  previewField: string
 }) {
   if (items.length === 0) return null
   return (
@@ -43,7 +54,7 @@ function PickEntryList({
         {items.slice(0, 20).map((raw, i) => {
           const it = raw as Record<string, unknown>
           const label = getLabel(it)
-          const extra = String(it.content ?? it.backgroundStory ?? '')
+          const extra = String(it[previewField] ?? '')
           return (
             <Checkbox
               key={i}
@@ -55,7 +66,7 @@ function PickEntryList({
                   <Text size="xs" fw={600}>{label}</Text>
                   {extra ? (
                     <Text size="xs" c="dimmed" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {extra.slice(0, 60)}{extra.length > 60 ? '…' : ''}
+                      {clip(extra, 60)}
                     </Text>
                   ) : null}
                 </Box>
@@ -69,14 +80,69 @@ function PickEntryList({
   )
 }
 
-/** 删除条目列表（名称数组）：每条 checkbox */
+/** 更新条目列表：每条 checkbox + 「旧 → 新」对比 */
+function PickUpdateList({
+  title, items, getLabel, selected, onToggle, oldOf, oldField, newField,
+}: {
+  title: string
+  items: Array<Record<string, unknown>>
+  getLabel: (x: Record<string, unknown>) => string
+  selected: Set<number>
+  onToggle: (idx: number) => void
+  oldOf: (name: string) => Record<string, unknown> | undefined
+  oldField: string
+  newField: string
+}) {
+  if (items.length === 0) return null
+  return (
+    <Box>
+      <Group gap={6} mb={4}>
+        <Badge size="xs" color="blue">{title}</Badge>
+        <Text size="xs" c="dimmed">{selected.size}/{items.length} 条</Text>
+      </Group>
+      <Stack gap={5}>
+        {items.slice(0, 20).map((raw, i) => {
+          const it = raw as Record<string, unknown>
+          const label = getLabel(it)
+          const oldIt = oldOf(label)
+          const oldTxt = oldIt ? String(oldIt[oldField] ?? '') : ''
+          const newTxt = String(it[newField] ?? '')
+          return (
+            <Box key={i} style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: '6px 8px', background: '#fafafa' }}>
+              <Group gap={4} mb={4}>
+                <Checkbox size="xs" checked={selected.has(i)} onChange={() => onToggle(i)} />
+                <Text size="xs" fw={600}>{label}</Text>
+              </Group>
+              {!oldIt ? (
+                <Text size="xs" c="dimmed">（未找到同名旧条目，此条实际不会执行更新）</Text>
+              ) : (
+                <>
+                  <Text size="xs" c="red" style={{ display: 'block' }}>
+                    <Text span fw={600}>旧</Text>：{oldTxt ? clip(oldTxt, 90) : '（空）'}
+                  </Text>
+                  <Text size="xs" c="green" style={{ display: 'block' }}>
+                    <Text span fw={600}>新</Text>：{newTxt ? clip(newTxt, 90) : '（空）'}
+                  </Text>
+                </>
+              )}
+            </Box>
+          )
+        })}
+        {items.length > 20 ? <Text size="xs" c="dimmed">… 其余 {items.length - 20} 条省略</Text> : null}
+      </Stack>
+    </Box>
+  )
+}
+
+/** 删除条目列表：每条 checkbox + 将被删内容摘要（红色） */
 function PickRemoveList({
-  title, names, selected, onToggle,
+  title, names, selected, onToggle, summaryOf,
 }: {
   title: string
   names: string[]
   selected: Set<string>
   onToggle: (name: string) => void
+  summaryOf: (name: string) => string
 }) {
   if (names.length === 0) return null
   return (
@@ -85,17 +151,76 @@ function PickRemoveList({
         <Badge size="xs" color="red">{title}</Badge>
         <Text size="xs" c="dimmed">{selected.size}/{names.length} 条</Text>
       </Group>
-      <Stack gap={4}>
-        {names.slice(0, 20).map((n, i) => (
-          <Checkbox
-            key={i}
-            size="xs"
-            checked={selected.has(n)}
-            onChange={() => onToggle(n)}
-            label={<Text size="xs" fw={600}>{n}</Text>}
-          />
-        ))}
+      <Stack gap={5}>
+        {names.slice(0, 20).map((n, i) => {
+          const sum = summaryOf(n)
+          return (
+            <Box key={i} style={{ border: '1px solid #ffcdd2', borderRadius: 6, padding: '6px 8px', background: '#fff5f5' }}>
+              <Group gap={4}>
+                <Checkbox size="xs" checked={selected.has(n)} onChange={() => onToggle(n)} />
+                <Text size="xs" fw={600} c="red">{n}</Text>
+              </Group>
+              {sum ? <Text size="xs" c="dimmed" style={{ display: 'block', marginTop: 3 }}>{clip(sum, 80)}</Text> : null}
+            </Box>
+          )
+        })}
         {names.length > 20 ? <Text size="xs" c="dimmed">… 其余 {names.length - 20} 条省略</Text> : null}
+      </Stack>
+    </Box>
+  )
+}
+
+/** 新增人物卡：完整字段预览 */
+function PickNewCardList({
+  title, items, selected, onToggle,
+}: {
+  title: string
+  items: Array<Record<string, unknown>>
+  selected: Set<number>
+  onToggle: (idx: number) => void
+}) {
+  if (items.length === 0) return null
+  const fields: Array<[string, string]> = [
+    ['age', '年龄'], ['gender', '性别'], ['occupation', '职业'], ['appearance', '外貌'],
+    ['height', '身高'], ['weight', '体重'], ['distinguishingFeatures', '显著特征'],
+    ['personalityType', '性格类型'], ['strengths', '优点'], ['weaknesses', '缺点'], ['hobbies', '爱好'],
+    ['backgroundStory', '背景故事'],
+  ]
+  return (
+    <Box>
+      <Group gap={6} mb={4}>
+        <Badge size="xs" color="green">{title}</Badge>
+        <Text size="xs" c="dimmed">{selected.size}/{items.length} 张</Text>
+      </Group>
+      <Stack gap={5}>
+        {items.slice(0, 10).map((raw, i) => {
+          const it = raw as Record<string, unknown>
+          const name = String(it.name ?? '（未命名）')
+          const rels = Array.isArray(it.relationships) && it.relationships.length
+            ? it.relationships.map((r: Record<string, unknown>) => `${r.targetName ?? ''}（${r.relation ?? ''}）${r.description ? `：${r.description}` : ''}`).join('；')
+            : ''
+          return (
+            <Box key={i} style={{ border: '1px solid #c8e6c9', borderRadius: 6, padding: '6px 8px', background: '#f7fbf7' }}>
+              <Group gap={4} mb={3}>
+                <Checkbox size="xs" checked={selected.has(i)} onChange={() => onToggle(i)} />
+                <Text size="xs" fw={600}>{name}</Text>
+              </Group>
+              <Stack gap={1}>
+                {fields.map(([k, label]) => {
+                  const v = String(it[k] ?? '').trim()
+                  if (!v || v === '未知') return null
+                  return (
+                    <Text key={k} size="xs" style={{ display: 'block', lineHeight: 1.5 }}>
+                      <Text span fw={600} c="dimmed">{label}</Text>：{clip(v, 80)}
+                    </Text>
+                  )
+                })}
+                {rels ? <Text size="xs" style={{ display: 'block', lineHeight: 1.5 }}><Text span fw={600} c="dimmed">关系</Text>：{clip(rels, 80)}</Text> : null}
+              </Stack>
+            </Box>
+          )
+        })}
+        {items.length > 10 ? <Text size="xs" c="dimmed">… 其余 {items.length - 10} 张省略</Text> : null}
       </Stack>
     </Box>
   )
@@ -110,6 +235,16 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
   }))
   const wbName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
   const ccName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
+
+  // 从 store 读当前条目，用于「旧 → 新」对比与删除摘要
+  const oldLookup = useMemo(() => {
+    const store = getDefaultStore()
+    const wbMap = new Map<string, Record<string, unknown>>()
+    for (const w of store.get(worldBooksAtom)) wbMap.set(w.name, { content: w.content })
+    const ccMap = new Map<string, Record<string, unknown>>()
+    for (const c of store.get(characterCardsAtom)) ccMap.set(c.name, { backgroundStory: c.backgroundStory })
+    return { wbOf: (n: string) => wbMap.get(n), ccOf: (n: string) => ccMap.get(n) }
+  }, [])
 
   const total = diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length +
     diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length
@@ -144,7 +279,6 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     }
   }
 
-  // 勾选结果 → 过滤后的差异
   const apply = () => {
     if (busy || selTotal === 0) return
     setBusy(true)
@@ -170,14 +304,8 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     modal.remove()
   }
 
-  const hasWb = useMemo(
-    () => diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length > 0,
-    [diff]
-  )
-  const hasCc = useMemo(
-    () => diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length > 0,
-    [diff]
-  )
+  const hasWb = diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length > 0
+  const hasCc = diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length > 0
 
   return (
     <Modal
@@ -194,18 +322,24 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
       ) : (
         <Stack gap="md">
           <Text size="xs" c="dimmed">
-            已勾选 {selTotal}/{total} 条。勾中的条目才会写入；未勾选的保持原样（应用前自动备份快照）。
+            已勾选 {selTotal}/{total} 条。更新条目会显示「旧 → 新」对比，确认旧信息没有被丢弃再勾选；删除条目为红色标注（应用前自动备份快照）。
           </Text>
-          <Box style={{ maxHeight: 420, overflow: 'auto', paddingRight: 4 }}>
+          <Box style={{ maxHeight: 430, overflow: 'auto', paddingRight: 4 }}>
             <Stack gap="sm">
               {hasWb && <Divider label="世界书" labelPosition="left" />}
-              <PickEntryList title="新增" color="green" items={diff.wb.add} getLabel={wbName} selected={sel.wb.add} onToggle={(i) => toggle('wb', 'add', i)} />
-              <PickEntryList title="更新" color="blue" items={diff.wb.update} getLabel={wbName} selected={sel.wb.update} onToggle={(i) => toggle('wb', 'update', i)} />
-              <PickRemoveList title="删除" names={diff.wb.remove} selected={sel.wb.remove} onToggle={(n) => toggleRemove('wb', n)} />
+              <PickEntryList title="新增" color="green" items={diff.wb.add} getLabel={wbName} selected={sel.wb.add} onToggle={(i) => toggle('wb', 'add', i)} previewField="content" />
+              <PickUpdateList
+                title="更新" items={diff.wb.update} getLabel={wbName} selected={sel.wb.update}
+                onToggle={(i) => toggle('wb', 'update', i)} oldOf={oldLookup.wbOf} oldField="content" newField="content"
+              />
+              <PickRemoveList title="删除" names={diff.wb.remove} selected={sel.wb.remove} onToggle={(n) => toggleRemove('wb', n)} summaryOf={(n) => String(oldLookup.wbOf(n)?.content ?? '')} />
               {hasCc && <Divider label="人物卡" labelPosition="left" />}
-              <PickEntryList title="新增" color="green" items={diff.cc.add} getLabel={ccName} selected={sel.cc.add} onToggle={(i) => toggle('cc', 'add', i)} />
-              <PickEntryList title="更新" color="blue" items={diff.cc.update} getLabel={ccName} selected={sel.cc.update} onToggle={(i) => toggle('cc', 'update', i)} />
-              <PickRemoveList title="删除" names={diff.cc.remove} selected={sel.cc.remove} onToggle={(n) => toggleRemove('cc', n)} />
+              <PickNewCardList title="新建人物卡" items={diff.cc.add} selected={sel.cc.add} onToggle={(i) => toggle('cc', 'add', i)} />
+              <PickUpdateList
+                title="更新" items={diff.cc.update} getLabel={ccName} selected={sel.cc.update}
+                onToggle={(i) => toggle('cc', 'update', i)} oldOf={oldLookup.ccOf} oldField="backgroundStory" newField="backgroundStory"
+              />
+              <PickRemoveList title="删除" names={diff.cc.remove} selected={sel.cc.remove} onToggle={(n) => toggleRemove('cc', n)} summaryOf={(n) => String(oldLookup.ccOf(n)?.backgroundStory ?? '')} />
             </Stack>
           </Box>
           <Group justify="space-between" gap="sm">
