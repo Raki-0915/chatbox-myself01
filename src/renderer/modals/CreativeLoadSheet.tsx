@@ -67,9 +67,8 @@ function SheetSection(props: {
           已装载 {selected.length}/{enabledEntries.length + disabledEntries.length}
         </Text>
       </Group>
-      {/* 文件夹切换（模仿创作资料：全部 / 未分类 / 各文件夹） */}
-      {folders.length > 0 ? (
-        <Group gap={6} wrap="wrap" mb={6}>
+      {/* 文件夹切换（模仿创作资料：全部 / 未分类 / 各文件夹；无文件夹时也显示 全部/未分类） */}
+      <Group gap={6} wrap="wrap" mb={6}>
           {[
             { key: 'all', label: `全部(${allEntries.length})` },
             { key: 'none', label: `未分类(${counts.none})` },
@@ -85,7 +84,6 @@ function SheetSection(props: {
             </Button>
           ))}
         </Group>
-      ) : null}
       <Stack gap={6}>
         {visible(enabledEntries).length === 0 && visible(disabledEntries).length === 0 ? (
           <Text size="xs" c="dimmed" py={6}>
