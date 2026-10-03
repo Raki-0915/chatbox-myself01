@@ -243,6 +243,7 @@ export async function maybeAutoUpdateWorldBooks(
         keywords: Array.isArray(item.keywords) ? item.keywords.map((k) => String(k)) : [],
         enabled: true,
         triggerMode: 'always',
+        depth: 0, // 剧情状态常驻最前：模型每轮都带着最新进展（受 wbInjectionLimit 截断保护）
         updatedAt: Date.now(),
         createdAt: existing?.createdAt ?? Date.now(),
       }

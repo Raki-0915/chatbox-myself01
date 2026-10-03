@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
-import { Badge, Box, Button, Divider, Group, Modal, ScrollArea, Stack, Text } from '@mantine/core'
+import { Badge, Box, Button, Divider, Group, Modal, Stack, Text } from '@mantine/core'
 import type { AutoUpdateDiff } from '../modules/auto-update'
 
 function EntryList({ title, color, items, getLabel }: { title: string; color: string; items: unknown[]; getLabel: (x: Record<string, unknown>) => string }) {
@@ -17,16 +17,20 @@ function EntryList({ title, color, items, getLabel }: { title: string; color: st
         <Badge size="xs" color={color}>{title}</Badge>
         <Text size="xs" c="dimmed">{items.length} 条</Text>
       </Group>
-      <Stack gap={3}>
+      <Stack gap={4}>
         {items.slice(0, 20).map((raw, i) => {
           const it = raw as Record<string, unknown>
           const label = getLabel(it)
-          const extra = String(it.content ?? it.backgroundStory ?? '').slice(0, 60)
+          const extra = String(it.content ?? it.backgroundStory ?? '')
           return (
-            <Text key={i} size="xs" style={{ lineHeight: 1.6 }}>
-              <Text span c="green" fw={600}>{label}</Text>
-              {extra ? <Text span c="dimmed"> — {extra}{String(it.content ?? it.backgroundStory ?? '').length > 60 ? '…' : ''}</Text> : null}
-            </Text>
+            <Box key={i} style={{ lineHeight: 1.55 }}>
+              <Text size="xs" c="green" fw={600}>{label}</Text>
+              {extra ? (
+                <Text size="xs" c="dimmed" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {extra.slice(0, 80)}{extra.length > 80 ? '…' : ''}
+                </Text>
+              ) : null}
+            </Box>
           )
         })}
         {items.length > 20 ? <Text size="xs" c="dimmed">… 其余 {items.length - 20} 条省略</Text> : null}
@@ -43,9 +47,9 @@ function RemoveList({ title, names }: { title: string; names: string[] }) {
         <Badge size="xs" color="red">{title}</Badge>
         <Text size="xs" c="dimmed">{names.length} 条</Text>
       </Group>
-      <Stack gap={3}>
+      <Stack gap={4}>
         {names.slice(0, 20).map((n, i) => (
-          <Text key={i} size="xs"><Text span c="red" fw={600}>{n}</Text></Text>
+          <Text key={i} size="xs" c="red" fw={600}>{n}</Text>
         ))}
         {names.length > 20 ? <Text size="xs" c="dimmed">… 其余 {names.length - 20} 条省略</Text> : null}
       </Stack>
@@ -63,8 +67,23 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length +
     diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length
 
+  // 可靠关闭：× / 取消 / 遮罩 / ESC 都走这里（remove 兜底卸载 + resolve 返回结果）
+  const close = (result: boolean) => {
+    if (busy) return
+    modal.resolve(result)
+    modal.remove()
+  }
+
   return (
-    <Modal opened onClose={() => modal.resolve(false)} title="更新预览 — 确认是否应用" size="lg">
+    <Modal
+      opened
+      onClose={() => close(false)}
+      closeOnClickOutside={!busy}
+      closeOnEscape={!busy}
+      title="更新预览 — 确认是否应用"
+      size="lg"
+      centered
+    >
       {total === 0 ? (
         <Text c="dimmed" size="sm">模型未提出任何变更，无需更新。</Text>
       ) : (
@@ -72,7 +91,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
           <Text size="xs" c="dimmed">
             以下为模型根据近期对话提出的设定变更，确认后才会写入世界书 / 人物卡（应用前会自动备份快照）。
           </Text>
-          <ScrollArea.Autosize mah={420}>
+          <Box style={{ maxHeight: 420, overflow: 'auto', paddingRight: 4 }}>
             <Stack gap="sm">
               {diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length > 0 && <Divider label="世界书" labelPosition="left" />}
               <EntryList title="新增" color="green" items={diff.wb.add} getLabel={wbName} />
@@ -83,10 +102,10 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
               <EntryList title="更新" color="blue" items={diff.cc.update} getLabel={ccName} />
               <RemoveList title="删除" names={diff.cc.remove} />
             </Stack>
-          </ScrollArea.Autosize>
+          </Box>
           <Group justify="flex-end" gap="sm">
-            <Button variant="subtle" onClick={() => modal.resolve(false)} disabled={busy}>取消</Button>
-            <Button color="chatbox-brand" onClick={() => { setBusy(true); modal.resolve(true) }} disabled={busy}>
+            <Button variant="subtle" onClick={() => close(false)} disabled={busy}>取消</Button>
+            <Button color="chatbox-brand" onClick={() => { setBusy(true); modal.resolve(true); modal.remove() }} disabled={busy}>
               {busy ? '应用更新…' : '确认更新'}
             </Button>
           </Group>
