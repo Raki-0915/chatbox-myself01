@@ -1193,6 +1193,9 @@ function AutoUpdateTab() {
   const [running, setRunning] = useState(isAutoUpdateRunning())
   const [lastResult, setLastResult] = useState<string>('')
   const sessionId = useAtomValue(currentSessionIdAtom)
+  // 分析消息数：是否处于快捷档位 / 是否点了「自定义」
+  const isPresetRc = ['8', '16', '30', '60'].includes(String(settings.recentMessages))
+  const [showCustomRc, setShowCustomRc] = useState(false)
 
   const runNow = async () => {
     if (!sessionId || sessionId === 'new') {
@@ -1237,15 +1240,29 @@ function AutoUpdateTab() {
       <Box>
         <Text size="sm" fw={600}>分析最近消息数</Text>
         <Text size="xs" c="dimmed" mb={6}>
-          自动更新分析时取最近多少条消息。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。
+          自动更新分析时取最近多少条消息（用户与 AI 回复都计入）。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。
         </Text>
         <SegmentedControl
           size="xs"
           fullWidth
-          value={String(settings.recentMessages)}
-          onChange={(v) => void updateModSettings({ recentMessages: Number(v) || 16 })}
-          data={['8', '16', '30', '60'].map((n) => ({ label: n, value: n }))}
+          value={isPresetRc && !showCustomRc ? String(settings.recentMessages) : 'custom'}
+          onChange={(v) => {
+            if (v === 'custom') setShowCustomRc(true)
+            else { setShowCustomRc(false); void updateModSettings({ recentMessages: Number(v) || 16 }) }
+          }}
+          data={[...['8', '16', '30', '60'].map((n) => ({ label: n, value: n })), { label: '自定义', value: 'custom' }]}
         />
+        {showCustomRc || !isPresetRc ? (
+          <NumberInput
+            mt={6}
+            size="xs"
+            label="自定义分析消息数"
+            value={settings.recentMessages}
+            min={4}
+            max={100}
+            onChange={(v) => void updateModSettings({ recentMessages: Number(v) || 16 })}
+          />
+        ) : null}
       </Box>
       <Group>
         <Button onClick={() => void runNow()} loading={running} leftSection={<IconRefresh size={16} />}>立即手动更新</Button>
