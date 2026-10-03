@@ -5,6 +5,17 @@
 
 ---
 
+## 最近改动（web 端修改）
+
+> 本次为 **Web 端修改版本**，功能已合并至 `main`，push 后由 GitHub Actions 自动构建 APK 并发布 Release。
+
+- **会话装载弹窗**：创作设置上拉板顶部新增「世界书 / 人物卡」**并排标签**，点击切换对应内容。
+- **数据导出**：支持自定义导出文件名并选择保存路径（Web 走系统「另存为」，移动端走 SAF）。
+- 涉及：`src/renderer/modals/CreativeLoadSheet.tsx`、`src/renderer/modules/ui/ExportModal.tsx`、`src/renderer/modules/export.ts`、`src/renderer/modules/ui/ChatboxModPage.tsx`
+- 对应提交：`e608951`（创作设置标签）、`16b2226`（导出功能）
+
+---
+
 ## 一、这是什么
 
 | 项 | 值 |
