@@ -17,6 +17,7 @@ import {
   Grid,
   Modal,
   NumberInput,
+  SegmentedControl,
   Select,
   Stack,
   Switch,
@@ -1233,13 +1234,19 @@ function AutoUpdateTab() {
         checked={settings.requireConfirm}
         onChange={(e) => void updateModSettings({ requireConfirm: e.currentTarget.checked })}
       />
-      <NumberInput
-        label="分析最近消息数"
-        value={settings.recentMessages}
-        min={4}
-        max={60}
-        onChange={(v) => void updateModSettings({ recentMessages: Number(v) || 16 })}
-      />
+      <Box>
+        <Text size="sm" fw={600}>分析最近消息数</Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          自动更新分析时取最近多少条消息。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。
+        </Text>
+        <SegmentedControl
+          size="xs"
+          fullWidth
+          value={String(settings.recentMessages)}
+          onChange={(v) => void updateModSettings({ recentMessages: Number(v) || 16 })}
+          data={['8', '16', '30', '60'].map((n) => ({ label: n, value: n }))}
+        />
+      </Box>
       <Group>
         <Button onClick={() => void runNow()} loading={running} leftSection={<IconRefresh size={16} />}>立即手动更新</Button>
         <Button variant="default" onClick={() => { forceUnlockAutoUpdate(); setRunning(false); setLastResult('已强制解锁') }}>强制解锁</Button>

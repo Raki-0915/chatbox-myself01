@@ -121,10 +121,11 @@ function PickUpdateList({
           const oldTxt = oldIt ? String(oldIt[oldField] ?? '') : ''
           const newTxt = String(it[newField] ?? '')
           const isTrivial = Boolean(trivial?.has(i))
+          const checked = selected.has(i)
           return (
-            <Box key={i} style={{ border: isTrivial ? '1px solid #ffe0b2' : '1px solid #e0e0e0', borderRadius: 6, padding: '6px 8px', background: isTrivial ? '#fff8f0' : '#fafafa' }}>
+            <Box key={i} style={{ border: checked ? (isTrivial ? '1.5px solid #ed8936' : '1.5px solid #2563eb') : (isTrivial ? '1px solid #ffe0b2' : '1px solid #e0e0e0'), borderRadius: 6, padding: '6px 8px', background: checked ? (isTrivial ? '#fff4e5' : '#eff6ff') : (isTrivial ? '#fff8f0' : '#fafafa'), cursor: 'pointer' }} onClick={() => onToggle(i)}>
               <Group gap={4} mb={4}>
-                <Checkbox size="xs" checked={selected.has(i)} onChange={() => onToggle(i)} />
+                <Checkbox size="xs" checked={checked} onChange={() => onToggle(i)} style={{ pointerEvents: 'none' }} />
                 <Text size="xs" fw={600}>{label}</Text>
                 {isTrivial ? <Badge size="xs" color="orange" variant="light">仅轻微改动</Badge> : null}
               </Group>
@@ -169,10 +170,11 @@ function PickRemoveList({
       <Stack gap={5}>
         {names.slice(0, 20).map((n, i) => {
           const sum = summaryOf(n)
+          const checked = selected.has(n)
           return (
-            <Box key={i} style={{ border: '1px solid #ffcdd2', borderRadius: 6, padding: '6px 8px', background: '#fff5f5' }}>
+            <Box key={i} style={{ border: checked ? '1.5px solid #ef4444' : '1px solid #ffcdd2', borderRadius: 6, padding: '6px 8px', background: checked ? '#fef2f2' : '#fff5f5', cursor: 'pointer' }} onClick={() => onToggle(n)}>
               <Group gap={4}>
-                <Checkbox size="xs" checked={selected.has(n)} onChange={() => onToggle(n)} />
+                <Checkbox size="xs" checked={checked} onChange={() => onToggle(n)} style={{ pointerEvents: 'none' }} />
                 <Text size="xs" fw={600} c="red">{n}</Text>
               </Group>
               {sum ? <Text size="xs" c="dimmed" style={{ display: 'block', marginTop: 3 }}>{clip(sum, 80)}</Text> : null}
@@ -214,10 +216,11 @@ function PickNewCardList({
           const rels = Array.isArray(it.relationships) && it.relationships.length
             ? it.relationships.map((r: Record<string, unknown>) => `${r.targetName ?? ''}（${r.relation ?? ''}）${r.description ? `：${r.description}` : ''}`).join('；')
             : ''
+          const checked = selected.has(i)
           return (
-            <Box key={i} style={{ border: '1px solid #c8e6c9', borderRadius: 6, padding: '6px 8px', background: '#f7fbf7' }}>
+            <Box key={i} style={{ border: checked ? '1.5px solid #16a34a' : '1px solid #c8e6c9', borderRadius: 6, padding: '6px 8px', background: checked ? '#f0fdf4' : '#f7fbf7', cursor: 'pointer' }} onClick={() => onToggle(i)}>
               <Group gap={4} mb={3}>
-                <Checkbox size="xs" checked={selected.has(i)} onChange={() => onToggle(i)} />
+                <Checkbox size="xs" checked={checked} onChange={() => onToggle(i)} style={{ pointerEvents: 'none' }} />
                 <Text size="xs" fw={600}>{name}</Text>
               </Group>
               <Stack gap={1}>
