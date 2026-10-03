@@ -134,16 +134,22 @@ export interface AutoUpdateResult {
   ccRemove: number
 }
 
+/** 更新预览：模型算出的差异，交给 UI 弹窗展示并让用户确认 */
+export interface AutoUpdateDiff {
+  wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
+  cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
+}
+
 /**
  * 核心入口：触发一次自动更新。
  * @param sid 会话 id（取其设置、最近消息、装载条目）
  * @param opts.fixedTarget 固定目标会话 id（v48 的 target mode，可选）
  * @param opts.force 强制运行（无视锁）
- * @param opts.onConfirm 若设置 requireConfirm，需外部确认后传入 true 才会写回
+ * @param opts.onPreview 若设置 requireConfirm，需弹「更新预览」让用户确认（返回 true 才写回）；兼容旧 onConfirm
  */
 export async function maybeAutoUpdateWorldBooks(
   sid: string,
-  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean> } = {}
+  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<boolean> } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
   if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0 }
@@ -187,9 +193,14 @@ export async function maybeAutoUpdateWorldBooks(
       throw new Error('模型输出无法解析为 JSON 差异')
     }
 
-    // 人工确认（可配置）
-    if (settings.requireConfirm && opts.onConfirm) {
-      const confirmed = await opts.onConfirm()
+    // 人工确认（可配置）：优先展示「更新预览」供用户逐条确认
+    if (settings.requireConfirm) {
+      let confirmed = false
+      if (opts.onPreview) {
+        confirmed = await opts.onPreview(diff)
+      } else if (opts.onConfirm) {
+        confirmed = await opts.onConfirm()
+      }
       if (!confirmed) {
         result.ok = false
         result.error = '已取消'

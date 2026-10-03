@@ -6,8 +6,11 @@
  * 不再像 v48 那样手工调 Filesystem+Share。
  */
 import { getDefaultStore } from 'jotai'
+import { Capacitor } from '@capacitor/core'
+import { Directory, Filesystem } from '@capacitor/filesystem'
 import { getLogger } from '@/lib/utils'
 import platform from '@/platform'
+import { AndroidDocumentSaver } from '@/platform/android_document_saver'
 import { characterCardsAtom, foldersAtom, modBackupsAtom, modLogAtom, modSettingsAtom, worldBooksAtom } from './store'
 
 const log = getLogger('mod-export')
@@ -40,13 +43,35 @@ export function buildExportPayload(): ModExportPayload {
   }
 }
 
+/** 导出为 JSON 文件（Android：弹系统「保存到」选择器，可选目录/重命名；其他平台走官方 exporter） */
+export async function exportBlobWithPicker(filename: string, blob: Blob): Promise<{ ok: boolean; error?: string; canceled?: boolean }> {
+  try {
+    if (Capacitor.getPlatform() === 'android') {
+      const data = await blob.text()
+      const cachePath = `mod-exports/${filename}`
+      const w = await Filesystem.writeFile({ path: cachePath, data, directory: Directory.Cache, recursive: true })
+      // SAF 系统保存对话框：用户自选目录与文件名
+      await AndroidDocumentSaver.saveFile({ sourceUri: w.uri, suggestedName: filename, mimeType: 'application/json' })
+      await Filesystem.deleteFile({ path: cachePath, directory: Directory.Cache }).catch(() => undefined)
+      return { ok: true }
+    }
+    await platform.exporter.exportBlob(filename, blob, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e)
+    if (/cancel/i.test(msg)) return { ok: false, canceled: true, error: '已取消' }
+    log.error('exportBlobWithPicker failed', e)
+    return { ok: false, error: msg }
+  }
+}
+
 /** 导出为 JSON 文件（复用官方 exporter，跨平台） */
 export async function exportModData(filename = 'chatbox-mod-data.json'): Promise<{ ok: boolean; error?: string }> {
   try {
     const json = JSON.stringify(buildExportPayload(), null, 2)
     const blob = new Blob([json], { type: 'application/json' })
-    await platform.exporter.exportBlob(filename, blob, 'utf8')
-    return { ok: true }
+    const r = await exportBlobWithPicker(filename, blob)
+    return r.canceled ? { ok: true } : { ok: r.ok, error: r.error }
   } catch (e) {
     log.error('exportModData failed', e)
     return { ok: false, error: String((e as Error)?.message ?? e) }

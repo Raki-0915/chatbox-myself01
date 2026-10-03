@@ -8,6 +8,7 @@
  * （generating 清除且内容非空），且内容与上次触发时不同。
  */
 import { getDefaultStore } from 'jotai'
+import NiceModal from '@ebay/nice-modal-react'
 import { rendererApplication } from '@/app/renderer-application'
 import { getLogger } from '@/lib/utils'
 import { QueryKeys } from '@chatbox/react/query'
@@ -68,7 +69,10 @@ async function onSessionCacheUpdated(sid: string, session: Session | null | unde
 
   // 延迟一小段，等消息状态完全落盘
   setTimeout(() => {
-    void maybeAutoUpdateWorldBooks(sid, { force: false }).then((r) => {
+    void maybeAutoUpdateWorldBooks(sid, {
+      force: false,
+      onPreview: (diff) => NiceModal.show('mod-update-preview', { diff }),
+    }).then((r) => {
       if (!r.ok && r.error && r.error !== '已有更新任务进行中') {
         log.warn(`auto-update for ${sid} skipped:`, r.error)
       } else if (r.ok) {

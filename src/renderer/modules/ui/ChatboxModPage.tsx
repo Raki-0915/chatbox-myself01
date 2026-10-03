@@ -29,6 +29,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconBook2, IconBookDownload, IconBookUpload, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
+import NiceModal from '@ebay/nice-modal-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
@@ -231,12 +232,13 @@ function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; 
   )
 }
 
-/** 导出条目列表为 JSON 文件（复用官方 exporter） */
+/** 导出条目列表为 JSON 文件（Android 弹系统「保存到」选择器，可选保存路径；其他平台走官方导出） */
 async function exportEntriesJson(filename: string, entries: unknown[]): Promise<{ ok: boolean; error?: string }> {
   try {
     const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' })
-    await platform.exporter.exportBlob(filename, blob, 'utf8')
-    return { ok: true }
+    const { exportBlobWithPicker } = await import('../export')
+    const r = await exportBlobWithPicker(filename, blob)
+    return r.canceled ? { ok: true } : { ok: r.ok, error: r.error }
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) }
   }
@@ -1123,7 +1125,10 @@ function AutoUpdateTab() {
     setRunning(true)
     setLastResult('正在分析…')
     try {
-      const r = await maybeAutoUpdateWorldBooks(sessionId, { force: true })
+      const r = await maybeAutoUpdateWorldBooks(sessionId, {
+        force: true,
+        onPreview: (diff) => NiceModal.show('mod-update-preview', { diff }),
+      })
       if (r.ok) {
         setLastResult(`完成：世界书 +${r.wbAdd} 改${r.wbUpdate} 删${r.wbRemove}；人物卡 +${r.ccAdd} 改${r.ccUpdate} 删${r.ccRemove}`)
       } else {
