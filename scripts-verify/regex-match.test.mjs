@@ -1,5 +1,5 @@
-/* 阶段1 本地验证：真实 buildWorldBookSection/matchWorldBookEntry 用例 */
-import { buildWorldBookSection } from '../src/renderer/modules/worldbook-match'
+/* 阶段1/2 本地验证：真实匹配 + 分层注入用例 */
+import { buildWorldBookSection, splitWorldBookSections } from '../src/renderer/modules/worldbook-match'
 
 const entries = [
   // 关键词模式：只认"海洋"两个字
@@ -48,5 +48,36 @@ all &&= t('火系不误触发', '他烧了一锅水', ['常驻设定'], ['火系
 // 火焰命中
 all &&= t('火系命中', '他施展火焰魔法', ['火系魔法'], [])
 
-console.log(all ? '\n== ALL PASS ==' : '\n== HAS FAIL ==')
-process.exitCode = all ? 0 : 1
+console.log(all ? '\n== 匹配用例 ALL PASS ==' : '\n== 匹配用例 HAS FAIL ==')
+
+// ---- 阶段2：分层注入用例 ----
+const layerEntries = [
+  { id: 'r1', name: '世界基调', content: '基调…', keywords: [], triggerMode: 'always', enabled: true, order: 0, depth: 0 },
+  { id: 'r2', name: '主角设定', content: '主角…', keywords: [], triggerMode: 'keyword', enabled: true, order: 1, depth: 0 },
+  { id: 's1', name: '海洋场景', content: '海洋场景…', keywords: ['海洋'], triggerMode: 'keyword', enabled: true, order: 2, depth: 1 },
+  { id: 's2', name: '长安场景', content: '长安场景…', keywords: ['长安|長安'], triggerMode: 'regex', enabled: true, order: 1, depth: 2 },
+  { id: 's3', name: '旧触发条目', content: '旧条目…', keywords: ['大海'], triggerMode: 'keyword', enabled: true, order: 0 },
+]
+function lt(name, dialog, expectResident, expectScene, expectSceneOrder) {
+  const { resident, scene } = splitWorldBookSections(layerEntries, dialog, 10000)
+  const residentNames = resident.split('\n').filter((l) => l.startsWith('### ')).map((l) => l.replace('### ', ''))
+  const sceneNames = scene.split('\n').filter((l) => l.startsWith('### ')).map((l) => l.replace('### ', ''))
+  const ok =
+    expectResident.every((n) => residentNames.includes(n)) &&
+    expectScene.every((n) => sceneNames.includes(n)) &&
+    (!expectSceneOrder || JSON.stringify(sceneNames) === JSON.stringify(expectSceneOrder))
+  console.log(`${ok ? 'PASS' : 'FAIL'} | ${name}\n  常驻: [${residentNames.join(', ')}]\n  场景: [${sceneNames.join(', ')}]`)
+  return ok
+}
+let lall = true
+// 常驻段含 always + depth0 触发条目；触发条目(海洋)进场景
+lall &&= lt('常驻与场景分离', '他在海洋上航行', ['世界基调', '主角设定'], ['海洋场景'], null)
+// depth 排序：海洋场景(depth1) 在 长安场景(depth2) 前
+lall &&= lt('场景按深度排序', '他来到海洋，五年后回到长安', ['世界基调'], ['海洋场景', '长安场景'], ['海洋场景', '长安场景'])
+// 旧数据无 depth 的触发条目 → 场景段（视为 depth1）
+lall &&= lt('旧数据进场景', '他看到了大海', ['世界基调'], ['旧触发条目'], null)
+// 未触发的场景条目不注入
+lall &&= lt('未触发不进场景', '随便一句话', ['世界基调', '主角设定'], [], null)
+
+console.log(lall ? '\n== 分层用例 ALL PASS ==' : '\n== 分层用例 HAS FAIL ==')
+process.exitCode = all && lall ? 0 : 1

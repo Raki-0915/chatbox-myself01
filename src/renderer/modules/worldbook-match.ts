@@ -37,3 +37,32 @@ export function buildWorldBookSection(entries: WorldBookEntry[], dialogText: str
   const sliced = body.slice(0, limit)
   return sliced ? `## World Book\n${sliced}` : ''
 }
+
+/**
+ * 世界书分层注入（简化深度版）：
+ * - 常驻段（resident）：always 或 depth===0 的条目，每轮必带，放 system 前部（模型注意力最高）
+ * - 场景段（scene）：触发命中的 keyword/regex 条目（depth>=1），按 depth 升序、同深度按 order 升序
+ * 旧数据兼容：未设 depth 的 always → 常驻；未设 depth 的触发条目 → 场景（视为 depth 1）
+ */
+export function splitWorldBookSections(
+  entries: WorldBookEntry[],
+  dialogText: string,
+  limit: number,
+): { resident: string; scene: string } {
+  const dt = String(dialogText ?? '').toLowerCase()
+  const valid = entries.filter((x) => x && x.enabled !== false && (x.content ?? '').trim())
+  const fmt = (list: WorldBookEntry[]): string => list.map((x) => `### ${x.name}\n${x.content.trim()}`).join('\n\n')
+
+  const resident = fmt(
+    valid
+      .filter((x) => x.triggerMode === 'always' || x.depth === 0) // 显式 depth 0 才常驻；旧数据 undefined 视为场景
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+  ).slice(0, limit)
+  const scene = fmt(
+    valid
+      .filter((x) => !(x.triggerMode === 'always' || x.depth === 0))
+      .filter((x) => matchWorldBookEntry(x, dt))
+      .sort((a, b) => (a.depth ?? 1) - (b.depth ?? 1) || (a.order ?? 0) - (b.order ?? 0)),
+  ).slice(0, limit)
+  return { resident, scene }
+}

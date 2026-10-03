@@ -14,7 +14,7 @@ function getEnabledByIds<T extends { id: string; enabled?: boolean }>(all: T[], 
 }
 
 /** 世界书匹配（纯函数）：always/regex/keyword 触发与段落组装，实现在 worldbook-match.ts（可独立单测） */
-import { buildWorldBookSection } from './worldbook-match'
+import { splitWorldBookSections } from './worldbook-match'
 
 /** 人物卡内容 → 注入段落（格式化 RPG 字段） */
 export function buildCharacterCardSection(cards: CharacterCard[], dialogText: string, limit: number): string {
@@ -53,6 +53,7 @@ export function buildCharacterCardSection(cards: CharacterCard[], dialogText: st
 /**
  * 构建世界书+人物卡注入段落（供 agent-harness 调用）。
  * 返回拼接好的段落（人物卡在前，世界书在后，与原版 v48 顺序一致）。
+ * 世界书采用分层注入（简化深度）：常驻段（always/depth0）在前，场景触发段（keyword/regex，depth>=1）按 depth/order 在后。
  */
 export async function buildWorldInjection(worldBookIds: string[], characterCardIds: string[], dialogText: string): Promise<string> {
   try {
@@ -63,7 +64,11 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
     const wb = getEnabledByIds(allWb, worldBookIds ?? [])
     const cc = getEnabledByIds(allCc, characterCardIds ?? [])
     const ccSection = buildCharacterCardSection(cc, dialogText, settings.ccInjectionLimit)
-    const wbSection = buildWorldBookSection(wb, dialogText, settings.wbInjectionLimit)
+    const { resident, scene } = splitWorldBookSections(wb, dialogText, settings.wbInjectionLimit)
+    const wbParts: string[] = []
+    if (resident) wbParts.push(`## World Book · 常驻设定\n${resident}`)
+    if (scene) wbParts.push(`## World Book · 场景触发\n${scene}`)
+    const wbSection = wbParts.join('\n\n')
     const parts = [ccSection, wbSection].filter(Boolean)
     return parts.length ? parts.join('\n\n') : ''
   } catch {

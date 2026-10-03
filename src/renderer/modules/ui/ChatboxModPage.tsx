@@ -272,7 +272,7 @@ export function WorldBooksTab() {
   const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
 
   const openNew = () => {
-    setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword', depth: 0 })
+    setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword' })
     open()
   }
   const openEdit = (w: WorldBookEntry) => {
@@ -316,7 +316,7 @@ export function WorldBooksTab() {
           keywords: Array.isArray(it.keywords) ? it.keywords.map(String) : [],
           enabled: it.enabled !== false,
           triggerMode: it.triggerMode === 'always' || it.triggerMode === 'regex' ? it.triggerMode : 'keyword',
-          depth: Number(it.depth) >= 0 ? Number(it.depth) : 0,
+          depth: typeof it.depth === 'number' ? it.depth : undefined,
           folderId: typeof it.folderId === 'string' ? it.folderId : undefined,
           order: Number(it.order) || 0,
           createdAt: typeof it.createdAt === 'number' ? it.createdAt : Date.now(),
