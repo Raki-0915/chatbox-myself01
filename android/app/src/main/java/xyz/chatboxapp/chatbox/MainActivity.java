@@ -7,8 +7,9 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
-    // 本地原生插件（不在 node_modules，cap sync 不会自动注册）需手动注册
+    // 必须在 super.onCreate() 之前注册：BridgeActivity.onCreate 内部会 load() 创建 Bridge
+    // （插件列表随即冻结），之后再 registerPlugin 只会写入无效的 builder，运行时仍报 not implemented
     registerPlugin(DocumentSaver.class);
+    super.onCreate(savedInstanceState);
   }
 }
