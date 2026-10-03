@@ -18,18 +18,21 @@ import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { characterCardsAtom, modSettingsAtom, updateModSettings, worldBooksAtom } from '@/modules/store'
+import { characterCardsAtom, foldersAtom, modSettingsAtom, updateModSettings, worldBooksAtom } from '@/modules/store'
 import { getBinding, setBinding } from '@/modules/session'
+import type { ModFolder } from '@/modules/types'
 
 interface SheetEntry {
   id: string
   name: string
   sub: string
+  folderId?: string
 }
 
 function SheetSection(props: {
   icon: React.ReactNode
   title: string
+  folders: ModFolder[]
   enabledEntries: SheetEntry[]
   disabledEntries: SheetEntry[]
   selected: string[]
@@ -37,7 +40,22 @@ function SheetSection(props: {
   onGoEnable: () => void
   accent: string
 }) {
-  const { icon, title, enabledEntries, disabledEntries, selected, onToggle, onGoEnable, accent } = props
+  const { icon, title, folders, enabledEntries, disabledEntries, selected, onToggle, onGoEnable, accent } = props
+  // 当前文件夹筛选：'all' 全部 / 'none' 未分类 / 文件夹 id
+  const [folder, setFolder] = useState<string>('all')
+
+  const allEntries = useMemo(() => [...enabledEntries, ...disabledEntries], [enabledEntries, disabledEntries])
+  const counts = useMemo(() => {
+    const none = allEntries.filter((i) => !i.folderId).length
+    const byFolder = new Map<string, number>()
+    for (const i of allEntries) {
+      if (i.folderId) byFolder.set(i.folderId, (byFolder.get(i.folderId) ?? 0) + 1)
+    }
+    return { none, byFolder }
+  }, [allEntries])
+  const visible = (list: SheetEntry[]) =>
+    folder === 'all' ? list : folder === 'none' ? list.filter((i) => !i.folderId) : list.filter((i) => i.folderId === folder)
+
   return (
     <Box>
       <Group gap={6} mb={6}>
@@ -49,13 +67,32 @@ function SheetSection(props: {
           已装载 {selected.length}/{enabledEntries.length + disabledEntries.length}
         </Text>
       </Group>
+      {/* 文件夹切换（模仿创作资料：全部 / 未分类 / 各文件夹） */}
+      {folders.length > 0 ? (
+        <Group gap={6} wrap="wrap" mb={6}>
+          {[
+            { key: 'all', label: `全部(${allEntries.length})` },
+            { key: 'none', label: `未分类(${counts.none})` },
+            ...folders.map((f) => ({ key: f.id, label: `${f.name}(${counts.byFolder.get(f.id) ?? 0})` })),
+          ].map((t) => (
+            <Button
+              key={t.key}
+              size="compact-xs"
+              variant={folder === t.key ? 'filled' : 'default'}
+              onClick={() => setFolder(t.key)}
+            >
+              {t.label}
+            </Button>
+          ))}
+        </Group>
+      ) : null}
       <Stack gap={6}>
-        {enabledEntries.length === 0 && disabledEntries.length === 0 ? (
+        {visible(enabledEntries).length === 0 && visible(disabledEntries).length === 0 ? (
           <Text size="xs" c="dimmed" py={6}>
-            暂无条目，请先在「设置-创作资料」中新建。
+            {allEntries.length === 0 ? '暂无条目，请先在「设置-创作资料」中新建。' : '当前文件夹下没有条目。'}
           </Text>
         ) : null}
-        {enabledEntries.map((e) => (
+        {visible(enabledEntries).map((e) => (
           <Flex
             key={e.id}
             align="center"
@@ -85,7 +122,7 @@ function SheetSection(props: {
             </Text>
           </Flex>
         ))}
-        {disabledEntries.map((e) => (
+        {visible(disabledEntries).map((e) => (
           <Flex
             key={e.id}
             align="center"
@@ -122,6 +159,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
   const navigate = useNavigate()
   const wbAll = useAtomValue(worldBooksAtom)
   const ccAll = useAtomValue(characterCardsAtom)
+  const folders = useAtomValue(foldersAtom)
   const modSettings = useAtomValue(modSettingsAtom)
 
   const [wbSel, setWbSel] = useState<string[]>([])
@@ -261,8 +299,9 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
               <SheetSection
                 icon={<IconBook2 size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
                 title="世界书"
-                enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}` }))}
-                disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发' }))}
+                folders={folders.filter((f) => f.kind === 'wb')}
+                enabledEntries={wbEnabled.map((w) => ({ id: w.id, name: w.name, sub: `${w.triggerMode === 'always' ? '始终注入' : '关键词触发'} · ${w.keywords?.length ? w.keywords.join('、') : '无关键词'}`, folderId: w.folderId }))}
+                disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发', folderId: w.folderId }))}
                 selected={wbSel}
                 onToggle={toggleWb}
                 onGoEnable={goEnable}
@@ -272,8 +311,9 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
               <SheetSection
                 icon={<IconUsers size={15} style={{ color: 'var(--chatbox-tint-secondary, #64748b)' }} />}
                 title="人物卡"
-                enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}` }))}
-                disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业' }))}
+                folders={folders.filter((f) => f.kind === 'cc')}
+                enabledEntries={ccEnabled.map((c) => ({ id: c.id, name: c.name, sub: `${c.occupation || '未知职业'}${c.gender ? ' · ' + c.gender : ''}`, folderId: c.folderId }))}
+                disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业', folderId: c.folderId }))}
                 selected={ccSel}
                 onToggle={toggleCc}
                 onGoEnable={goEnable}
