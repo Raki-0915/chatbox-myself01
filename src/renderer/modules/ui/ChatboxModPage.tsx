@@ -33,7 +33,6 @@ import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import Page from '@/components/layout/Page'
-import platform from '@/platform'
 import { currentSessionIdAtom } from '@/stores/atoms/sessionAtoms'
 import { useSessionSettings } from '@/stores/session/session-settings'
 import {
@@ -63,7 +62,8 @@ import type { CharacterCard, ModFolder, WorldBookEntry } from '../types'
 import { addBindingItems, clearBinding, getBinding, listSessionsMeta, replaceBinding, setBinding } from '../session'
 import type { SessionMetaLike } from '../session'
 import { forceUnlockAutoUpdate, isAutoUpdateRunning, maybeAutoUpdateWorldBooks } from '../auto-update'
-import { exportModData, importModData } from '../export'
+import { buildExportPayload, importModData } from '../export'
+import { ExportModal, type ExportModalConfig } from './ExportModal'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
 
@@ -231,17 +231,6 @@ function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; 
   )
 }
 
-/** 导出条目列表为 JSON 文件（复用官方 exporter） */
-async function exportEntriesJson(filename: string, entries: unknown[]): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' })
-    await platform.exporter.exportBlob(filename, blob, 'utf8')
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: String((e as Error)?.message ?? e) }
-  }
-}
-
 /** 读取导入文件并解析为条目数组（兼容 3 种格式：条目数组 / 单条对象 / {worldBooks|characterCards:[...]} 导出包） */
 function readJsonArrayFile(file: File): Promise<unknown[]> {
   return new Promise((resolve, reject) => {
@@ -278,6 +267,8 @@ export function WorldBooksTab() {
   const [importing, setImporting] = useState(false)
   const bs = useBatchSelect(items)
   const wbFolders = folders.filter((f) => f.kind === 'wb')
+  const [exportCfg, setExportCfg] = useState<ExportModalConfig | null>(null)
+  const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
 
   const openNew = () => {
     setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword' })
@@ -293,9 +284,9 @@ export function WorldBooksTab() {
     close()
   }
 
-  const doExport = async () => {
-    const r = await exportEntriesJson('chatbox-mod-worldbooks.json', items)
-    setMsg(r.ok ? `已导出 ${items.length} 条世界书` : `导出失败：${r.error}`)
+  const doExport = () => {
+    setExportCfg({ defaultName: 'chatbox-mod-worldbooks.json', makeBlob: () => new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' }) })
+    openExport()
   }
 
   const doImport = async (file: File | null) => {
@@ -347,10 +338,10 @@ export function WorldBooksTab() {
   }, [items, query, cat])
 
   // 导出选中
-  const doExportSel = async () => {
+  const doExportSel = () => {
     const list = items.filter((i) => selectedIds.includes(i.id))
-    const r = await exportEntriesJson('chatbox-mod-worldbooks-selected.json', list)
-    setMsg(r.ok ? `已导出选中 ${list.length} 条世界书` : `导出失败：${r.error}`)
+    setExportCfg({ defaultName: 'chatbox-mod-worldbooks-selected.json', makeBlob: () => new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' }) })
+    openExport()
     bs.clear()
   }
   // 全选/取消（按当前过滤结果）
@@ -479,6 +470,15 @@ export function WorldBooksTab() {
           </Stack>
         )}
       </Modal>
+      <ExportModal
+        opened={exportOpen}
+        onClose={closeExport}
+        title="导出世界书"
+        defaultName={exportCfg?.defaultName}
+        makeBlob={exportCfg?.makeBlob}
+        description="可修改导出文件名；点击导出后按系统提示选择保存到指定位置。"
+        onDone={(_ok, m) => setMsg(m)}
+      />
     </Stack>
   )
 }
@@ -537,6 +537,8 @@ export function CharactersTab() {
   const [presetMerge, setPresetMerge] = useState<CharacterCard[] | null>(null)
   const folders = useAtomValue(foldersAtom)
   const ccFolders = folders.filter((f) => f.kind === 'cc')
+  const [exportCfg, setExportCfg] = useState<ExportModalConfig | null>(null)
+  const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
   const bs = useBatchSelect(items)
 
   const openNew = () => {
@@ -556,9 +558,9 @@ export function CharactersTab() {
     close()
   }
 
-  const doExport = async () => {
-    const r = await exportEntriesJson('chatbox-mod-charactercards.json', items)
-    setMsg(r.ok ? `已导出 ${items.length} 张人物卡` : `导出失败：${r.error}`)
+  const doExport = () => {
+    setExportCfg({ defaultName: 'chatbox-mod-charactercards.json', makeBlob: () => new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' }) })
+    openExport()
   }
 
   const doImport = async (file: File | null) => {
@@ -620,10 +622,10 @@ export function CharactersTab() {
   }, [items, query, cat])
 
   // 导出选中
-  const doExportSel = async () => {
+  const doExportSel = () => {
     const list = items.filter((c) => selectedIds.includes(c.id))
-    const r = await exportEntriesJson('chatbox-mod-charactercards-selected.json', list)
-    setMsg(r.ok ? `已导出选中 ${list.length} 张人物卡` : `导出失败：${r.error}`)
+    setExportCfg({ defaultName: 'chatbox-mod-charactercards-selected.json', makeBlob: () => new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' }) })
+    openExport()
     bs.clear()
   }
   // 全选/取消（按当前过滤结果）
@@ -762,6 +764,15 @@ export function CharactersTab() {
         opened={mergeOpen}
         onClose={() => { closeMerge(); setPresetMerge(null) }}
         folderNameOf={(id) => ccFolders.find((f) => f.id === id)?.name}
+      />
+      <ExportModal
+        opened={exportOpen}
+        onClose={closeExport}
+        title="导出人物卡"
+        defaultName={exportCfg?.defaultName}
+        makeBlob={exportCfg?.makeBlob}
+        description="可修改导出文件名；点击导出后按系统提示选择保存到指定位置。"
+        onDone={(_ok, m) => setMsg(m)}
       />
     </Stack>
   )
@@ -1328,6 +1339,8 @@ function SettingsTab() {
   const [restoreResult, setRestoreResult] = useState('')
   const [importing, setImporting] = useState(false)
   const [hasV48, setHasV48] = useState(false)
+  const [exportCfg, setExportCfg] = useState<ExportModalConfig | null>(null)
+  const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
 
   useEffect(() => {
     void import('../migration').then(({ hasV48Data }) => setHasV48(hasV48Data()))
@@ -1346,9 +1359,12 @@ function SettingsTab() {
     setHasV48(false)
   }
 
-  const doExport = async () => {
-    const r = await exportModData()
-    setRestoreResult(r.ok ? '已导出' : `导出失败：${r.error}`)
+  const doExport = () => {
+    setExportCfg({
+      defaultName: 'chatbox-mod-data.json',
+      makeBlob: () => new Blob([JSON.stringify(buildExportPayload(), null, 2)], { type: 'application/json' }),
+    })
+    openExport()
   }
   const doImport = async (file: File | null) => {
     if (!file) return
@@ -1399,6 +1415,15 @@ function SettingsTab() {
         {backups.length === 0 ? <Text c="dimmed" size="sm">暂无备份。</Text> : null}
       </Stack>
       {restoreResult ? <Text size="sm">{restoreResult}</Text> : null}
+      <ExportModal
+        opened={exportOpen}
+        onClose={closeExport}
+        title="导出全部数据"
+        defaultName={exportCfg?.defaultName}
+        makeBlob={exportCfg?.makeBlob}
+        description="导出世界书 / 人物卡 / 设置 / 日志 / 备份的完整 JSON。可修改导出文件名；点击导出后按系统提示选择保存到指定位置。"
+        onDone={(_ok, m) => setRestoreResult(m)}
+      />
     </Stack>
   )
 }
