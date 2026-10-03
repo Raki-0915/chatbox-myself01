@@ -12,10 +12,12 @@ export interface WorldBookEntry {
   content: string
   keywords: string[]
   enabled: boolean
-  /** 触发模式：always = 总是注入；keyword = 命中关键词才注入 */
-  triggerMode?: 'always' | 'keyword'
+  /** 触发模式：always = 总是注入；keyword = 命中关键词才注入；regex = 命中正则才注入 */
+  triggerMode?: 'always' | 'keyword' | 'regex'
   /** 注入顺序（升序） */
   order?: number
+  /** 注入深度：0 = 常驻最前（always 默认）；1/2/3… = 触发后按深度分层（越近权重越大） */
+  depth?: number
   folderId?: string
   createdAt?: number
   updatedAt?: number

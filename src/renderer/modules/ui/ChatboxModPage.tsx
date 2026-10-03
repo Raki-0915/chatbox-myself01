@@ -272,7 +272,7 @@ export function WorldBooksTab() {
   const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
 
   const openNew = () => {
-    setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword' })
+    setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword', depth: 0 })
     open()
   }
   const openEdit = (w: WorldBookEntry) => {
@@ -281,6 +281,16 @@ export function WorldBooksTab() {
   }
   const save = async () => {
     if (!editing) return
+    if (editing.triggerMode === 'regex') {
+      const p = Array.isArray(editing.keywords) ? editing.keywords[0] ?? '' : ''
+      try {
+        // eslint-disable-next-line no-new
+        new RegExp(p)
+      } catch {
+        setMsg(`正则表达式无效，无法保存：${p}`)
+        return
+      }
+    }
     await addOrUpdateWorldBook(editing)
     close()
   }
@@ -305,7 +315,8 @@ export function WorldBooksTab() {
           content: typeof it.content === 'string' ? it.content : '',
           keywords: Array.isArray(it.keywords) ? it.keywords.map(String) : [],
           enabled: it.enabled !== false,
-          triggerMode: it.triggerMode === 'always' ? 'always' : 'keyword',
+          triggerMode: it.triggerMode === 'always' || it.triggerMode === 'regex' ? it.triggerMode : 'keyword',
+          depth: Number(it.depth) >= 0 ? Number(it.depth) : 0,
           folderId: typeof it.folderId === 'string' ? it.folderId : undefined,
           order: Number(it.order) || 0,
           createdAt: typeof it.createdAt === 'number' ? it.createdAt : Date.now(),
@@ -413,8 +424,8 @@ export function WorldBooksTab() {
               <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
                 <Group gap="xs">
                   <Text fw={600} size="sm" lineClamp={1}>{w.name}</Text>
-                  <Badge size="xs" variant="light" color={w.triggerMode === 'always' ? 'green' : 'blue'}>
-                    {w.triggerMode === 'always' ? '始终' : '关键词'}
+                  <Badge size="xs" variant="light" color={w.triggerMode === 'always' ? 'green' : w.triggerMode === 'regex' ? 'grape' : 'blue'}>
+                    {w.triggerMode === 'always' ? '始终' : w.triggerMode === 'regex' ? '正则' : '关键词'}
                   </Badge>
                   {w.folderId ? <Badge size="xs" variant="outline">{wbFolders.find((f) => f.id === w.folderId)?.name ?? '未知文件夹'}</Badge> : null}
                 </Group>
@@ -439,20 +450,30 @@ export function WorldBooksTab() {
           <Stack gap="sm">
             <TextInput label="名称" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.currentTarget.value })} />
             <Textarea label="内容" autosize minRows={6} value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.currentTarget.value })} />
-            <TextInput
-              label="触发关键词（逗号分隔）"
-              value={editing.keywords.join('、')}
-              onChange={(e) => setEditing({ ...editing, keywords: e.currentTarget.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })}
-            />
+            {editing.triggerMode === 'regex' ? (
+              <TextInput
+                label="正则表达式（命中对话文本才注入，如：长安|長安|Chang'an）"
+                value={editing.keywords[0] ?? ''}
+                placeholder="长安|長安|Chang'an"
+                onChange={(e) => setEditing({ ...editing, keywords: [e.currentTarget.value] })}
+              />
+            ) : (
+              <TextInput
+                label="触发关键词（逗号分隔）"
+                value={editing.keywords.join('、')}
+                onChange={(e) => setEditing({ ...editing, keywords: e.currentTarget.value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })}
+              />
+            )}
             <Group>
               <Select
                 label="触发模式"
                 data={[
                   { value: 'keyword', label: '关键词命中才注入' },
+                  { value: 'regex', label: '正则命中才注入' },
                   { value: 'always', label: '始终注入' },
                 ]}
                 value={editing.triggerMode ?? 'keyword'}
-                onChange={(v) => setEditing({ ...editing, triggerMode: (v as 'keyword' | 'always') ?? 'keyword' })}
+                onChange={(v) => setEditing({ ...editing, triggerMode: (v as 'keyword' | 'regex' | 'always') ?? 'keyword' })}
               />
               <Select
                 label="文件夹"
@@ -463,6 +484,7 @@ export function WorldBooksTab() {
                 clearable
               />
               <NumberInput label="排序（升序）" value={editing.order ?? 0} onChange={(v) => setEditing({ ...editing, order: Number(v) || 0 })} />
+              <NumberInput label="注入深度（0=常驻最前）" value={editing.depth ?? 0} onChange={(v) => setEditing({ ...editing, depth: Math.max(0, Number(v) || 0) })} />
             </Group>
             <Group justify="flex-end">
               <Button variant="subtle" onClick={close}>取消</Button>

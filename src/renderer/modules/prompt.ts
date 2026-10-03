@@ -13,22 +13,8 @@ function getEnabledByIds<T extends { id: string; enabled?: boolean }>(all: T[], 
   return all.filter((x) => x && x.enabled !== false && ids.includes(x.id))
 }
 
-/** 世界书内容 → 注入段落（关键词触发 + order 排序） */
-export function buildWorldBookSection(entries: WorldBookEntry[], dialogText: string, limit: number): string {
-  const dt = String(dialogText ?? '').toLowerCase()
-  const hit = entries
-    .filter((x) => x && x.enabled !== false && (x.content ?? '').trim())
-    .filter((x) => {
-      if (!x.triggerMode || x.triggerMode !== 'keyword') return true // always 必带
-      const kws = Array.isArray(x.keywords) ? x.keywords.map((k) => String(k).toLowerCase()).filter(Boolean) : []
-      return kws.some((k) => dt.includes(k))
-    })
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-  if (hit.length === 0) return ''
-  const body = hit.map((x) => `### ${x.name}\n${x.content.trim()}`).join('\n\n')
-  const sliced = body.slice(0, limit)
-  return sliced ? `## World Book\n${sliced}` : ''
-}
+/** 世界书匹配（纯函数）：always/regex/keyword 触发与段落组装，实现在 worldbook-match.ts（可独立单测） */
+import { buildWorldBookSection } from './worldbook-match'
 
 /** 人物卡内容 → 注入段落（格式化 RPG 字段） */
 export function buildCharacterCardSection(cards: CharacterCard[], dialogText: string, limit: number): string {
