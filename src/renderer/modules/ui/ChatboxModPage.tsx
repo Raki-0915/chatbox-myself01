@@ -409,7 +409,10 @@ export function WorldBooksTab() {
           <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
           <Grid.Col span={1}><MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
           <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={() => { void removeItems('wb', selectedIds); bs.clear() }}>删除所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={async () => {
+            const ok = await NiceModal.show('confirm', { title: '删除世界书', message: `确定删除选中的 ${selectedIds.length} 条世界书？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
+            if (ok) { void removeItems('wb', selectedIds); bs.clear() }
+          }}>删除所选</Button></Grid.Col>
         </Grid>
       )}
       <Stack gap="xs">
@@ -438,7 +441,11 @@ export function WorldBooksTab() {
                 <Group gap={4} wrap="nowrap">
                   <Switch checked={w.enabled !== false} size="xs" onClick={(e) => e.stopPropagation()} onChange={(e) => void toggleWorldBook(w.id, e.currentTarget.checked)} />
                   <Button size="compact-xs" variant="subtle" onClick={(e) => { e.stopPropagation(); openEdit(w) }}>编辑</Button>
-                  <Button size="compact-xs" variant="subtle" color="red" onClick={(e) => { e.stopPropagation(); void removeWorldBook(w.id) }}>删除</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={async (e) => {
+                    e.stopPropagation()
+                    const ok = await NiceModal.show('confirm', { title: '删除世界书', message: `确定删除「${w.name}」？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
+                    if (ok) void removeWorldBook(w.id)
+                  }}>删除</Button>
                 </Group>
               )}
             </Group>
@@ -749,7 +756,10 @@ export function CharactersTab() {
             </Button>
           </Grid.Col>
           <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={() => { void removeItems('cc', selectedIds); bs.clear() }}>删除所选</Button></Grid.Col>
+          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={async () => {
+            const ok = await NiceModal.show('confirm', { title: '删除人物卡', message: `确定删除选中的 ${selectedIds.length} 张人物卡？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
+            if (ok) { void removeItems('cc', selectedIds); bs.clear() }
+          }}>删除所选</Button></Grid.Col>
         </Grid>
       )}
       <Stack gap="xs">
@@ -794,7 +804,11 @@ export function CharactersTab() {
                 <Group gap={4} wrap="nowrap">
                   <Switch checked={c.enabled !== false} size="xs" onClick={(e) => e.stopPropagation()} onChange={(e) => void toggleCharacterCard(c.id, e.currentTarget.checked)} />
                   <Button size="compact-xs" variant="subtle" onClick={(e) => { e.stopPropagation(); openEdit(c) }}>编辑</Button>
-                  <Button size="compact-xs" variant="subtle" color="red" onClick={(e) => { e.stopPropagation(); void removeCharacterCard(c.id) }}>删除</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={async (e) => {
+                    e.stopPropagation()
+                    const ok = await NiceModal.show('confirm', { title: '删除人物卡', message: `确定删除「${c.name}」？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
+                    if (ok) void removeCharacterCard(c.id)
+                  }}>删除</Button>
                 </Group>
               )}
             </Group>

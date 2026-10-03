@@ -35,6 +35,7 @@ import { getSidebarModalSx } from './sidebar-drawer'
 import icon from './static/icon.png'
 import { useLanguage } from './stores/settingsStore'
 import { useUIStore } from './stores/uiStore'
+import { MOD_BUILD } from './modules/version'
 import { installUpdate, useUpdateStore } from './stores/updateStore'
 import { CHATBOX_BUILD_PLATFORM, CHATBOX_BUILD_TARGET } from './variables'
 
@@ -185,10 +186,12 @@ export default function Sidebar() {
               <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
                 Chatbox
               </Text>
-              {/* Desktop shows the version in the bottom About link, so only surface it here on mobile */}
-              {isSmallScreen && /\d/.test(versionHook.version) && (
+              {/* 移动端在标题右侧显示版本：优先 fork 构建版本号（如 fork版_202610030800），否则显示官方版本 */}
+              {isSmallScreen && (
                 <Text span c="chatbox-tertiary" size="sm">
-                  {versionHook.version}
+                  {MOD_BUILD.includes('__MOD_BUILD__')
+                    ? (/\d/.test(versionHook.version) ? versionHook.version : '')
+                    : MOD_BUILD}
                 </Text>
               )}
             </Flex>
