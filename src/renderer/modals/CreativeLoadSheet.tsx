@@ -18,7 +18,7 @@ import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { characterCardsAtom, modSettingsAtom, worldBooksAtom } from '@/modules/store'
+import { characterCardsAtom, modSettingsAtom, updateModSettings, worldBooksAtom } from '@/modules/store'
 import { getBinding, setBinding } from '@/modules/session'
 
 interface SheetEntry {
@@ -126,6 +126,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
   const [wbSel, setWbSel] = useState<string[]>([])
   const [ccSel, setCcSel] = useState<string[]>([])
   const [auto, setAuto] = useState<boolean>(modSettings.autoUpdateEnabled)
+  const [confirm, setConfirm] = useState<boolean>(modSettings.requireConfirm)
 
   // 打开时读取当前会话的装载状态（自动更新为对话级：会话有设置用会话值，否则回退全局）
   useEffect(() => {
@@ -154,8 +155,9 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
     setCcSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
   const save = async () => {
-    // 对话级保存：装载 + 自动更新开关写入当前会话 settings
+    // 对话级保存：装载 + 自动更新开关写入当前会话 settings；写回前确认是全局设置
     await setBinding(sessionId, { worldBookIds: wbSel, characterCardIds: ccSel, autoUpdateEnabled: auto })
+    await updateModSettings({ requireConfirm: confirm })
     modal.resolve(true)
     modal.remove()
   }
@@ -250,6 +252,22 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
               <Switch
                 checked={auto}
                 onChange={(e) => setAuto(e.currentTarget.checked)}
+                size="md"
+                color="chatbox-brand"
+              />
+            </Group>
+            <Group justify="space-between" align="flex-start" px="xs" pb="xs">
+              <Box style={{ flex: 1 }}>
+                <Text fw={500} size="sm">
+                  写回前要求确认
+                </Text>
+                <Text size="xs" c="dimmed" mt={2}>
+                  分析完成后弹出「更新预览」窗口，确认后才写入世界书 / 人物卡
+                </Text>
+              </Box>
+              <Switch
+                checked={confirm}
+                onChange={(e) => setConfirm(e.currentTarget.checked)}
                 size="md"
                 color="chatbox-brand"
               />
