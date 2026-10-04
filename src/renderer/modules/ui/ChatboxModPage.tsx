@@ -29,7 +29,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBook2, IconBookDownload, IconBookUpload, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconUsers, IconWand } from '@tabler/icons-react'
+import { IconBook2, IconBookDownload, IconBookUpload, IconCircleCheck, IconCircleX, IconDownload, IconFolderOpen, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
 import NiceModal from '@ebay/nice-modal-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useState } from 'react'
@@ -242,6 +242,7 @@ function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; 
         placeholder="移动到文件夹"
         clearable
         size="xs"
+        leftSection={<IconFolderOpen size={14} />}
         data={[
           ...folders.map((f) => ({ value: f.id, label: f.name })),
           { value: '__new__', label: '＋ 新建文件夹…' },
@@ -440,19 +441,21 @@ export function WorldBooksTab() {
       />
       <NewFolderModal opened={newFolderOpen} onClose={closeNewFolder} kind="wb" onCreated={(f) => setCat(f.id)} />
       {bs.mode && (
-        <Grid columns={3} gutter="xs">
-          <Grid.Col span={1}>
-            <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
-          </Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
-          <Grid.Col span={1}><MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={async () => {
+        <>
+          <Grid columns={3} gutter="xs">
+            <Grid.Col span={1}>
+              <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
+            </Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconCircleCheck size={14} />} style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconCircleX size={14} />} style={{ width: '100%' }} onClick={() => { void setItemsEnabled('wb', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
+            <Grid.Col span={2}><MoveFolderSelect kind="wb" folders={wbFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconDownload size={14} />} style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
+          </Grid>
+          <Button size="xs" color="red" variant="filled" leftSection={<IconTrash size={14} />} style={{ width: '100%', marginTop: 6 }} onClick={async () => {
             const ok = await NiceModal.show('confirm', { title: '删除世界书', message: `确定删除选中的 ${selectedIds.length} 条世界书？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
             if (ok) { void removeItems('wb', selectedIds); bs.clear() }
-          }}>删除所选</Button></Grid.Col>
-        </Grid>
+          }}>删除所选</Button>
+        </>
       )}
       <Stack gap="xs">
         {filtered.map((w) => (
@@ -806,33 +809,38 @@ export function CharactersTab() {
       />
       <NewFolderModal opened={newFolderOpen} onClose={closeNewFolder} kind="cc" onCreated={(f) => setCat(f.id)} />
       {bs.mode && (
-        <Grid columns={3} gutter="xs">
-          <Grid.Col span={1}>
-            <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
-          </Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
-          <Grid.Col span={1}><MoveFolderSelect kind="cc" folders={ccFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Grid.Col>
-          <Grid.Col span={1}>
-            <Button
-              size="xs"
-              variant="default"
-              disabled={selectedIds.length < 2}
-              style={{ width: '100%' }}
-              onClick={() => {
-                setPresetMerge(items.filter((c) => selectedIds.includes(c.id)))
-                openMerge()
-              }}
-            >
-              合并人物卡
-            </Button>
-          </Grid.Col>
-          <Grid.Col span={1}><Button size="xs" variant="default" style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
-          <Grid.Col span={1}><Button size="xs" color="red" variant="subtle" style={{ width: '100%' }} onClick={async () => {
+        <>
+          <Grid columns={3} gutter="xs">
+            <Grid.Col span={1}>
+              <Button size="xs" variant={bs.sel.size === filtered.length && filtered.length > 0 ? 'filled' : 'default'} onClick={toggleAll} style={{ width: '100%' }}>全选</Button>
+            </Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconCircleCheck size={14} />} style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, true); bs.clear() }}>启用所选</Button></Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconCircleX size={14} />} style={{ width: '100%' }} onClick={() => { void setItemsEnabled('cc', selectedIds, false); bs.clear() }}>禁用所选</Button></Grid.Col>
+          </Grid>
+          <Box style={{ marginTop: 6 }}><MoveFolderSelect kind="cc" folders={ccFolders} ids={selectedIds} onMoved={() => bs.clear()} /></Box>
+          <Grid columns={2} gutter="xs" style={{ marginTop: 6 }}>
+            <Grid.Col span={1}>
+              <Button
+                size="xs"
+                variant="default"
+                leftSection={<IconGitMerge size={14} />}
+                disabled={selectedIds.length < 2}
+                style={{ width: '100%' }}
+                onClick={() => {
+                  setPresetMerge(items.filter((c) => selectedIds.includes(c.id)))
+                  openMerge()
+                }}
+              >
+                合并人物卡
+              </Button>
+            </Grid.Col>
+            <Grid.Col span={1}><Button size="xs" variant="default" leftSection={<IconDownload size={14} />} style={{ width: '100%' }} onClick={() => void doExportSel()}>导出所选</Button></Grid.Col>
+          </Grid>
+          <Button size="xs" color="red" variant="filled" leftSection={<IconTrash size={14} />} style={{ width: '100%', marginTop: 6 }} onClick={async () => {
             const ok = await NiceModal.show('confirm', { title: '删除人物卡', message: `确定删除选中的 ${selectedIds.length} 张人物卡？删除不可撤销（可用设置/导出中的自动更新备份恢复）。`, confirmText: '删除', danger: true })
             if (ok) { void removeItems('cc', selectedIds); bs.clear() }
-          }}>删除所选</Button></Grid.Col>
-        </Grid>
+          }}>删除所选</Button>
+        </>
       )}
       <Stack gap="xs">
         {filtered.map((c) => (
