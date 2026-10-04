@@ -94,6 +94,16 @@ async function main() {
     const s = buildAssociatedEventSection([card], '完全没有关键词', 2000)
     check('事件注入:无命中返回空', s === '')
   }
+  {
+    const card = { ...baseCard(), eventInjectionEnabled: false, associatedEvents: [{ id: 'a', roleName: '龙辰', content: '事件A', keywords: ['甲'], t: 1 }] }
+    const s = buildAssociatedEventSection([card], '关于甲的事情', 2000)
+    check('事件注入:关闭注入开关则不注入', s === '')
+  }
+  {
+    const card = { ...baseCard(), eventInjectionEnabled: true, associatedEvents: [{ id: 'a', roleName: '龙辰', content: '事件A', keywords: ['甲'], t: 1 }] }
+    const s = buildAssociatedEventSection([card], '关于甲的事情', 2000)
+    check('事件注入:开关开启时正常注入', s.includes('事件A'))
+  }
 
   console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
   if (fail > 0) process.exit(1)

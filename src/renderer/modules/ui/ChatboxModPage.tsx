@@ -1299,7 +1299,14 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
     { field: 'backgroundStory', label: '背景故事', content: card.backgroundStory },
   ]
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" className="cc-editor">
+      {/* 编辑弹窗排版优化：整体字号调小（框大小不变），避免长文本/窄栏截断 */}
+      <style>{`
+        .cc-editor input, .cc-editor textarea { font-size: 13px; }
+        .cc-editor label { font-size: 12px; }
+        .cc-editor .mantine-InputWrapper-label { font-size: 12px; }
+        .cc-editor .mantine-Input-section { font-size: 12px; }
+      `}</style>
       <Switch
         label="冻结模式（整段选择冻结）"
         checked={freeze}
@@ -1332,10 +1339,9 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       <FrozenTextarea label="外貌" field="appearance" value={card.appearance} onChange={(v) => set({ appearance: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <FrozenTextarea label="显著特征" field="distinguishingFeatures" value={card.distinguishingFeatures} onChange={(v) => set({ distinguishingFeatures: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <FrozenTextarea label="性格类型" field="personalityType" value={card.personalityType} onChange={(v) => set({ personalityType: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
-      <Group grow>
-        <FrozenTextarea label="优点" field="strengths" value={card.strengths} onChange={(v) => set({ strengths: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
-        <FrozenTextarea label="缺点" field="weaknesses" value={card.weaknesses} onChange={(v) => set({ weaknesses: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
-      </Group>
+      {/* 优点/缺点：上下排列（不并排），全宽显示避免截断 */}
+      <FrozenTextarea label="优点" field="strengths" value={card.strengths} onChange={(v) => set({ strengths: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
+      <FrozenTextarea label="缺点" field="weaknesses" value={card.weaknesses} onChange={(v) => set({ weaknesses: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <FrozenTextarea label="爱好" field="hobbies" value={card.hobbies} onChange={(v) => set({ hobbies: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <FrozenTextarea
         label="背景故事"
@@ -1367,9 +1373,12 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       ))}
       <Button size="compact-xs" variant="subtle" onClick={() => set({ customAttributes: [...card.customAttributes, { key: '', value: '' }] })}>+ 添加属性</Button>
       {/* 关联事件区（角色知识库：剧情进展累积、关键词触发注入、可单条冻结） */}
-      <Divider label={`关联事件区（${events.length} 条 · 只增不改 · 关键词触发注入）`} labelPosition="left" />
+      <Divider label="角色知识库（CharacterBook）" labelPosition="left" />
+      <Text size="xs" c="dimmed">角色专属事件与记忆，跟随人物卡；勾选关键词触发后，对话命中才注入上下文。</Text>
       {events.length === 0 ? (
-        <Text c="dimmed" size="xs">暂无关联事件。剧情进展由自动更新追加到这里（累积大事记，不会被覆盖）。</Text>
+        <Box style={{ border: '1px dashed #d0d0d0', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
+          <Text size="xs" c="dimmed">暂无条目。角色的个人事件（剧情进展、经历）建议放这里，而不是全局世界书。</Text>
+        </Box>
       ) : (
         <Stack gap={4}>
           {events.slice().reverse().map((e) => (
@@ -1409,7 +1418,15 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
           </Group>
         </>
       ) : (
-        <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(true)}>+ 手动添加事件</Button>
+        <Group justify="space-between" align="center">
+          <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(true)}>+ 添加条目</Button>
+          <Switch
+            label="启用（注入到对话上下文）"
+            checked={card.eventInjectionEnabled !== false}
+            onChange={(e) => set({ eventInjectionEnabled: e.currentTarget.checked })}
+            size="xs"
+          />
+        </Group>
       )}
       {/* 归属 */}
       <Divider label="归属" labelPosition="left" />

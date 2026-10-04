@@ -70,6 +70,8 @@ export function buildAssociatedEventSection(cards: CharacterCard[], dialogText: 
   const rows: string[] = []
   for (const c of cards) {
     if (!c || !c.name) continue
+    // 该卡关闭事件注入（eventInjectionEnabled === false）→ 跳过
+    if (c.eventInjectionEnabled === false) continue
     const list = (c.associatedEvents ?? []).filter((e) => e && String(e.content ?? '').trim())
     if (list.length === 0) continue
     const hit = list.filter((e) => (e.keywords ?? []).some((k) => k && dt.includes(String(k).toLowerCase())))

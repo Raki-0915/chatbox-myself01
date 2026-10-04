@@ -80,6 +80,8 @@ export interface CharacterCard {
   frozenTexts?: Array<{ field: string; text: string } | string>
   /** 关联事件区（角色知识库）：剧情进展累积追加，绑定角色，关键词触发注入，只增不改 */
   associatedEvents?: AssociatedEvent[]
+  /** 关联事件注入开关（默认开）：关掉后该卡的关联事件不注入上下文 */
+  eventInjectionEnabled?: boolean
 }
 
 /** 设定文件夹（世界书/人物卡共用，kind 区分） */
