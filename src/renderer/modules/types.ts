@@ -51,6 +51,8 @@ export interface CharacterCard {
   relationships: CharacterRelationship[]
   customAttributes: Array<{ key: string; value: string }>
   characterBook: WorldBookEntry[]
+  /** 立绘头像（dataURL，来自 PNG 人物卡导入） */
+  avatar?: string
   folderId?: string
   enabled: boolean
   createdAt: number

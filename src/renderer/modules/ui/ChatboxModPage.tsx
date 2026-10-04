@@ -67,6 +67,7 @@ import type { SessionMetaLike } from '../session'
 import { forceUnlockAutoUpdate, isAutoUpdateRunning, maybeAutoUpdateWorldBooks } from '../auto-update'
 import { buildExportPayload, importModData } from '../export'
 import { ExportModal, type ExportModalConfig } from './ExportModal'
+import { isPngBytes, parseCharacterCardJson, parseCharacterCardPng, mapTavernCardToMod } from '../png-character-import'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
 import { MOD_BUILD } from '../version'
@@ -97,6 +98,39 @@ export function ChatboxModPage() {
 }
 
 /* ======================== 多选与导入导出（世界书/人物卡共用） ======================== */
+
+/** PNG 人物卡：立绘缩放为 256px 方形头像（dataURL），控制存储体积 */
+async function pngToAvatarDataUrl(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(String(fr.result ?? ''))
+    fr.onerror = () => reject(new Error('读取图片失败'))
+    fr.readAsDataURL(file)
+  })
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image()
+      im.onload = () => resolve(im)
+      im.onerror = () => reject(new Error('图片解码失败'))
+      im.src = dataUrl
+    })
+    const canvas = document.createElement('canvas')
+    const size = 256
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return dataUrl
+    const scale = Math.max(size / img.width, size / img.height)
+    const w = img.width * scale
+    const h = img.height * scale
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, size, size)
+    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h)
+    return canvas.toDataURL('image/jpeg', 0.82)
+  } catch {
+    return dataUrl
+  }
+}
 
 /** 多选状态管理 */
 function useBatchSelect<T extends { id: string }>(items: T[]) {
@@ -632,8 +666,40 @@ export function CharactersTab() {
     if (!file) return
     setImporting(true)
     try {
-      const arr = await readJsonArrayFile(file)
+      const buf = new Uint8Array(await file.arrayBuffer())
+      const isPng = isPngBytes(buf)
       let n = 0
+      if (isPng) {
+        // PNG 人物卡：解析 tEXt 内嵌数据（ccv3 / chara），立绘存头像
+        const tavern = parseCharacterCardPng(buf)
+        if (!tavern) {
+          setMsg('导入 0 张：这个 PNG 里没有识别到人物卡数据（需要酒馆/Chub 标准的 ccv3 或 chara 数据块）')
+          return
+        }
+        const m = mapTavernCardToMod(tavern)
+        const card = createEmptyCharacterCard()
+        card.name = m.fields.name
+        card.backgroundStory = m.fields.backgroundStory
+        card.personalityType = m.fields.personalityType
+        card.customAttributes = m.fields.customAttributes
+        card.characterBook = m.bookEntries.map((e) => ({
+          id: uuidv4(),
+          name: e.name,
+          keywords: e.keywords,
+          content: e.content,
+          comment: e.comment,
+          triggerMode: e.triggerMode,
+          depth: e.depth,
+          order: e.order,
+          enabled: e.enabled,
+        }))
+        card.avatar = await pngToAvatarDataUrl(file)
+        await addOrUpdateCharacterCard(card)
+        n = 1
+        setMsg(`导入完成：1 张 PNG 人物卡「${card.name}」${card.characterBook.length > 0 ? `（含 ${card.characterBook.length} 条世界书条目）` : ''}`)
+        return
+      }
+      const arr = await readJsonArrayFile(file)
       for (const raw of arr) {
         const it = raw as Partial<CharacterCard>
         if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
@@ -654,12 +720,13 @@ export function CharactersTab() {
         card.backgroundStory = typeof it.backgroundStory === 'string' ? it.backgroundStory : ''
         card.relationships = Array.isArray(it.relationships) ? it.relationships.map((r) => ({ targetName: String(r?.targetName ?? ''), relation: String(r?.relation ?? ''), description: String(r?.description ?? '') })) : []
         card.customAttributes = Array.isArray(it.customAttributes) ? it.customAttributes.map((a) => ({ key: String(a?.key ?? ''), value: String(a?.value ?? '') })) : []
+        card.avatar = typeof it.avatar === 'string' ? it.avatar : undefined
         card.folderId = typeof it.folderId === 'string' ? it.folderId : undefined
         card.enabled = it.enabled !== false
         await addOrUpdateCharacterCard(card)
         n++
       }
-      setMsg(arr.length === 0 ? '导入 0 张：文件中没有可识别的人物卡（支持数组 / 单卡 / 导出包格式）' : `导入完成：${n} 张人物卡`)
+      setMsg(arr.length === 0 ? '导入 0 张：文件中没有可识别的人物卡（支持数组 / 单卡 / 导出包 / PNG 人物卡格式）' : `导入完成：${n} 张人物卡`)
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -705,10 +772,10 @@ export function CharactersTab() {
       <Group justify="space-between" wrap="wrap">
         <Text c="dimmed" size="sm">{bs.mode ? `已选 ${bs.sel.size}/${filtered.length} 张` : (msg ? msg : `共 ${items.length} 张人物卡`)}</Text>
         <Group gap={4}>
-          <Tooltip label="选择人物卡 JSON 文件（导入合并）">
+          <Tooltip label="选择人物卡文件（JSON / PNG 人物卡，导入合并）">
             <label>
               <Button component="span" size="xs" variant="default" loading={importing}>导入</Button>
-              <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
+              <input type="file" accept="application/json,image/png" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
             </label>
           </Tooltip>
           <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
@@ -778,6 +845,20 @@ export function CharactersTab() {
           >
             <Group justify="space-between" wrap="nowrap">
               {bs.mode && <Checkbox checked={bs.sel.has(c.id)} onChange={() => bs.toggle(c.id)} aria-label={c.name} size="sm" />}
+              {c.avatar ? (
+                <Box
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                    background: 'rgba(127,127,127,0.12)',
+                  }}
+                >
+                  <img src={c.avatar} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                </Box>
+              ) : null}
               <Stack gap={3} style={{ flex: 1, minWidth: 0 }}>
                 {/* 行1：姓名 + 职业 + 文件夹 */}
                 <Group gap="xs" wrap="wrap">
