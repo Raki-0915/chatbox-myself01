@@ -13,11 +13,13 @@ import {
   IconId,
   IconSearch,
   IconTrash,
+  IconUpload,
 } from '@tabler/icons-react'
 import { useSetAtom } from 'jotai'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { rendererApplication } from '@/app/renderer-application'
+import { parseChatImport, toSessionMessages } from '@/modules/chat-import'
 import { useIsLargeScreen, useIsSmallScreen } from '@/hooks/useScreenChange'
 import { copyToClipboard } from '@/packages/navigator'
 import { confirmSessionDeletion } from '@/presentation/session/session-deletion-confirmation'
@@ -74,6 +76,49 @@ export default function Toolbar({ session }: { session: Session }) {
       await NiceModal.show('json-viewer', { title: t('Session Raw JSON'), data: session })
     }
   }, [sessionId, t])
+
+  // Chatbox Mod: 导入聊天记录（支持官方导出的 .md/.txt、通用 .json/.jsonl，含酒馆 SillyTavern 聊天记录）
+  const handleImportChat = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,.jsonl,.md,.markdown,.txt,text/plain,application/json'
+    input.style.display = 'none'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      input.remove()
+      if (!file) return
+      void (async () => {
+        try {
+          const text = await file.text()
+          const parsed = parseChatImport(text, file.name)
+          if (!parsed.ok || parsed.messages.length === 0) {
+            toastActions.add(parsed.error ?? '导入失败：未解析到任何消息', 4000)
+            return
+          }
+          const messages = toSessionMessages(parsed.messages)
+          const baseName = parsed.name || file.name.replace(/\.(json|jsonl|md|markdown|txt)$/i, '') || '导入的对话'
+          const session = await rendererApplication.sessions.createSession({
+            name: baseName,
+            messages,
+            type: 'chat',
+            threadName: parsed.name || '',
+            settings: {},
+          })
+          if (!session) {
+            toastActions.add('导入失败：创建会话失败', 4000)
+            return
+          }
+          toastActions.add(`已导入 ${messages.length} 条消息`, 2500)
+          const { navigateToDynamicPath } = await import('@/router')
+          navigateToDynamicPath({ to: `/session/${session.id}` })
+        } catch (e) {
+          toastActions.add(`导入失败：${String(e)}`, 4000)
+        }
+      })()
+    }
+    document.body.appendChild(input)
+    input.click()
+  }, [t])
 
   const handleCopySession = useCallback(async () => {
     const session = await rendererApplication.sessionQueryBridge.getSession(sessionId)
@@ -166,6 +211,12 @@ export default function Toolbar({ session }: { session: Session }) {
             testId: TestId.session.export,
             onClick: handleExportAndSave,
           },
+          {
+            text: '导入聊天记录',
+            icon: IconUpload,
+            testId: 'import-chat-trigger',
+            onClick: handleImportChat,
+          },
           ...(process.env.NODE_ENV === 'development'
             ? [
                 {
@@ -248,6 +299,12 @@ export default function Toolbar({ session }: { session: Session }) {
             icon: IconDeviceFloppy,
             testId: TestId.session.export,
             onClick: handleExportAndSave,
+          },
+          {
+            text: '导入聊天记录',
+            icon: IconUpload,
+            testId: 'import-chat-trigger',
+            onClick: handleImportChat,
           },
           ...(process.env.NODE_ENV === 'development'
             ? [
