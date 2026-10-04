@@ -183,17 +183,19 @@ export default function Sidebar() {
               style={{ cursor: 'pointer', minWidth: 0 }}
             >
               <Image src={icon} w={20} h={20} />
-              <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
-                Chatbox
-              </Text>
-              {/* 移动端在标题右侧显示版本：优先 fork 构建版本号（如 fork版_202610030800），否则显示官方版本 */}
-              {isSmallScreen && (
-                <Text span c="chatbox-tertiary" size="sm">
-                  {MOD_BUILD.includes('__MOD_BUILD__')
-                    ? (/\d/.test(versionHook.version) ? versionHook.version : '')
-                    : MOD_BUILD}
+              <Stack gap={0} style={{ minWidth: 0 }}>
+                <Text span c="chatbox-secondary" size="xl" lh={1.2} fw="700" truncate>
+                  Chatbox
                 </Text>
-              )}
+                {/* 移动端在标题下方显示版本：优先 fork 构建版本号（如 fork版_202610030800），否则显示官方版本；小字号不撑宽侧边栏 */}
+                {isSmallScreen && (
+                  <Text span c="chatbox-tertiary" style={{ fontSize: 10, lineHeight: 1.3, maxWidth: '100%' }} truncate>
+                    {MOD_BUILD.includes('__MOD_BUILD__')
+                      ? (/\d/.test(versionHook.version) ? versionHook.version : '')
+                      : MOD_BUILD}
+                  </Text>
+                )}
+              </Stack>
             </Flex>
             {FORCE_ENABLE_DEV_PAGES && <ThemeSwitchButton size="xs" />}
           </Flex>

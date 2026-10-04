@@ -5,7 +5,7 @@ import { TestId } from '@shared/automation/testids'
 import { chatSessionSettings } from '@shared/defaults'
 import { createMessage, isChatSession, ModelProviderEnum, type Session } from '@shared/types'
 import { MAX_TOOL_CALLS_BEFORE_CONFIRMATION, shouldPauseOnToolCallLimit } from '@shared/utils/tool-call-limit-pause'
-import { IconBook2, IconTrash, IconUpload } from '@tabler/icons-react'
+import { IconTrash, IconUpload } from '@tabler/icons-react'
 import { pick } from 'lodash'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -363,36 +363,6 @@ const SessionSettingsModal = NiceModal.create(
             </Stack>
           </Stack>
         </div>
-
-        {/* Chatbox Mod: 创作设置入口 */}
-        <Box px="lg" pb="sm">
-          <UnstyledButton
-            onClick={() => {
-              if (!editingData?.id) return
-              NiceModal.show('creative-load-sheet', { sessionId: editingData.id })
-            }}
-            style={{
-              width: '100%',
-              background: 'var(--chatbox-background-brand-secondary, #eff6ff)',
-              border: '1px solid var(--chatbox-brand-color, #bfdbfe)',
-              color: 'var(--chatbox-brand-color, #1e40af)',
-              borderRadius: 10,
-              padding: '10px 0',
-              textAlign: 'center',
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            <Flex justify="center" align="center" gap={6}>
-              <IconBook2 size={15} style={{ color: 'var(--chatbox-brand-color, #1e40af)' }} />
-              <span>创作设置</span>
-            </Flex>
-          </UnstyledButton>
-          <Text size="xs" c="dimmed" style={{ textAlign: 'center', marginTop: 6 }}>
-            装载世界书/人物卡到本对话 · 自动更新开关
-          </Text>
-        </Box>
 
         <AdaptiveModal.Actions>
           <AdaptiveModal.CloseButton onClick={onCancel} />
