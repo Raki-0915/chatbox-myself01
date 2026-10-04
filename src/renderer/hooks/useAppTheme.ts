@@ -1,8 +1,10 @@
 import { createTheme, type ThemeOptions } from '@mui/material/styles'
 import { getDefaultInterfaceColors, resolveInterfaceBrandColor } from '@shared/theme-colors'
+import { useAtomValue } from 'jotai'
 import { useLayoutEffect, useMemo } from 'react'
 import { settingsStore, useLanguage, useSettingsStore } from '@/stores/settingsStore'
 import { uiStore, useUIStore } from '@/stores/uiStore'
+import { modSettingsAtom } from '@/modules/store'
 import { type Language, Theme } from '../../shared/types'
 import platform from '../platform'
 import DesktopPlatform from '../platform/desktop_platform'
@@ -28,6 +30,9 @@ export default function useAppTheme() {
   const interfaceColors = useSettingsStore((state) => state.interfaceColors ?? getDefaultInterfaceColors())
   const realTheme = useUIStore((state) => state.realTheme)
   const language = useLanguage()
+  // Chatbox Mod: 聊天模式（群聊）强制深色主题 —— 统一 MUI / CSS 变量 / tailwind 三套系统
+  const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
+  const effectiveTheme: 'light' | 'dark' = modChatMode === 'group' ? 'dark' : realTheme
 
   useLayoutEffect(() => {
     switchTheme(theme)
@@ -42,31 +47,35 @@ export default function useAppTheme() {
 
   useLayoutEffect(() => {
     // update material-ui theme
-    document.querySelector('html')?.setAttribute('data-theme', realTheme)
+    document.querySelector('html')?.setAttribute('data-theme', effectiveTheme)
     // update tailwindcss theme
-    if (realTheme === 'dark') {
+    if (effectiveTheme === 'dark') {
       document.documentElement.classList.add('dark')
     } else {
       document.documentElement.classList.remove('dark')
     }
-  }, [realTheme])
+  }, [effectiveTheme])
 
   useLayoutEffect(() => {
-    const colors = interfaceColors[realTheme]
-    const brandColor = resolveInterfaceBrandColor(colors.brand, realTheme)
+    const colors = interfaceColors[effectiveTheme]
+    const brandColor = resolveInterfaceBrandColor(colors.brand, effectiveTheme)
     const rootStyle = document.documentElement.style
     rootStyle.setProperty('--chatbox-background-primary', colors.backgroundPrimary)
     rootStyle.setProperty('--chatbox-background-secondary', colors.backgroundSecondary)
     rootStyle.setProperty('--chatbox-background-tertiary', colors.backgroundTertiary)
     rootStyle.setProperty('--chatbox-brand', brandColor)
-  }, [interfaceColors, realTheme])
+  }, [interfaceColors, effectiveTheme])
 
   const themeObj = useMemo(
     () =>
       createTheme(
-        getThemeDesign(realTheme, language, resolveInterfaceBrandColor(interfaceColors[realTheme].brand, realTheme))
+        getThemeDesign(
+          effectiveTheme,
+          language,
+          resolveInterfaceBrandColor(interfaceColors[effectiveTheme].brand, effectiveTheme)
+        )
       ),
-    [interfaceColors, language, realTheme]
+    [interfaceColors, language, effectiveTheme]
   )
   return themeObj
 }
