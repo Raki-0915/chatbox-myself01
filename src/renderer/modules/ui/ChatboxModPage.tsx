@@ -191,6 +191,54 @@ function FrozenTextarea({
   )
 }
 
+/** 冻结选择模式：整张卡片的字段列表，点一下整段冻结/取消（再点一次取消） */
+function FreezePicker({
+  fields, frozenTexts, onFrozenChange, onExit,
+}: {
+  fields: Array<{ field: string; label: string; content: string }>
+  frozenTexts: Array<{ field: string; text: string } | string> | undefined
+  onFrozenChange: (list: Array<{ field: string; text: string }>) => void
+  onExit: () => void
+}) {
+  const raw = Array.isArray(frozenTexts) ? frozenTexts : []
+  const isFrozen = (field: string, content: string) => {
+    const t = content.trim()
+    if (!t) return false
+    return raw.some((x) => (typeof x === 'string' ? x.trim() === t : x.field === field && x.text === t))
+  }
+  return (
+    <Stack gap="xs">
+      <Text size="sm" fw={600}>冻结选择 — 点击字段整段冻结，再点一次取消</Text>
+      <Text size="xs" c="dimmed">冻结的段落自动更新不会改写（AI 动过就原文回填）</Text>
+      {fields.map((f) => {
+        const frozen = isFrozen(f.field, f.content)
+        return (
+          <Box
+            key={f.field}
+            style={{
+              border: frozen ? '1.5px solid #f2a8a8' : '1px solid #e0e0e0',
+              background: frozen ? '#fff1f1' : '#fafafa',
+              borderRadius: 6, padding: '6px 10px', cursor: 'pointer', lineHeight: 1.5,
+            }}
+            onClick={() => onFrozenChange(toggleFrozen(frozenTexts ?? [], f.field, f.content))}
+          >
+            <Group justify="space-between" gap={6}>
+              <Text size="sm" fw={600}>{f.label}</Text>
+              {frozen ? <Badge size="sm" color="red" variant="light">🔒 已冻结</Badge> : <Badge size="sm" color="gray" variant="light">可冻结</Badge>}
+            </Group>
+            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-word' }}>
+              {f.content.trim() ? `${f.content.replace(/\s+/g, ' ').slice(0, 80)}${f.content.length > 80 ? '…' : ''}` : '（空，不能冻结）'}
+            </Text>
+          </Box>
+        )
+      })}
+      <Group justify="flex-end" mt={4}>
+        <Button size="xs" variant="subtle" onClick={onExit}>返回编辑</Button>
+      </Group>
+    </Stack>
+  )
+}
+
 /** 多选状态管理 */
 function useBatchSelect<T extends { id: string }>(items: T[]) {
   const [mode, setMode] = useState(false)
@@ -360,6 +408,7 @@ export function WorldBooksTab() {
   const items = useAtomValue(worldBooksAtom)
   const folders = useAtomValue(foldersAtom)
   const [editing, setEditing] = useState<WorldBookEntry | null>(null)
+  const [wbFreeze, setWbFreeze] = useState(false)
   const [opened, { open, close }] = useDisclosure(false)
   const [msg, setMsg] = useState('')
   const [importing, setImporting] = useState(false)
@@ -369,10 +418,12 @@ export function WorldBooksTab() {
   const [exportOpen, { open: openExport, close: closeExport }] = useDisclosure(false)
 
   const openNew = () => {
+    setWbFreeze(false)
     setEditing({ id: uuidv4(), name: '', content: '', keywords: [], enabled: true, triggerMode: 'keyword' })
     open()
   }
   const openEdit = (w: WorldBookEntry) => {
+    setWbFreeze(false)
     setEditing({ ...w, keywords: [...w.keywords] })
     open()
   }
@@ -558,6 +609,21 @@ export function WorldBooksTab() {
       <Modal opened={opened} onClose={close} title="编辑世界书" size="lg">
         {editing && (
           <Stack gap="sm">
+            <Switch
+              label="冻结模式（整段选择冻结）"
+              checked={wbFreeze}
+              onChange={(e) => setWbFreeze(e.currentTarget.checked)}
+              size="xs"
+            />
+            {wbFreeze ? (
+              <FreezePicker
+                fields={[{ field: 'content', label: '内容', content: editing.content }]}
+                frozenTexts={editing.frozenTexts}
+                onFrozenChange={(list) => setEditing({ ...editing, frozenTexts: list })}
+                onExit={() => setWbFreeze(false)}
+              />
+            ) : (
+              <>
             <TextInput label="名称" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.currentTarget.value })} />
             <FrozenTextarea
               label="内容"
@@ -635,6 +701,8 @@ export function WorldBooksTab() {
                 </Stack>
               </Box>
             ) : null}
+              </>
+            )}
           </Stack>
         )}
       </Modal>
@@ -1213,8 +1281,33 @@ function MergeCardsModal(props: {
 
 function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard; onChange: (c: CharacterCard) => void; folders: ModFolder[] }) {
   const set = (patch: Partial<CharacterCard>) => onChange({ ...card, ...patch })
+  const [freeze, setFreeze] = useState(false)
+  const fields = [
+    { field: 'appearance', label: '外貌', content: card.appearance },
+    { field: 'distinguishingFeatures', label: '显著特征', content: card.distinguishingFeatures },
+    { field: 'personalityType', label: '性格类型', content: card.personalityType },
+    { field: 'strengths', label: '优点', content: card.strengths },
+    { field: 'weaknesses', label: '缺点', content: card.weaknesses },
+    { field: 'hobbies', label: '爱好', content: card.hobbies },
+    { field: 'backgroundStory', label: '背景故事', content: card.backgroundStory },
+  ]
   return (
     <Stack gap="sm">
+      <Switch
+        label="冻结模式（整段选择冻结）"
+        checked={freeze}
+        onChange={(e) => setFreeze(e.currentTarget.checked)}
+        size="xs"
+      />
+      {freeze ? (
+        <FreezePicker
+          fields={fields}
+          frozenTexts={card.frozenTexts}
+          onFrozenChange={(list) => set({ frozenTexts: list })}
+          onExit={() => setFreeze(false)}
+        />
+      ) : (
+        <>
       {/* 基本信息 */}
       <Divider label="基本信息" labelPosition="left" />
       <Group grow>
@@ -1290,6 +1383,8 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
               style={{ flex: 1 }}
             />
           </Group>
+        </>
+      )}
         </>
       )}
     </Stack>
