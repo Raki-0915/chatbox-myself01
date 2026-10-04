@@ -9,7 +9,7 @@ import {
   type Session,
   type SessionSettings,
 } from '@shared/types'
-import { IconChevronLeft, IconChevronRight, IconMessageCircle2Filled, IconX } from '@tabler/icons-react'
+import { IconChevronLeft, IconChevronRight, IconDeviceFloppy, IconDots, IconMessageCircle2Filled, IconSearch, IconX } from '@tabler/icons-react'
 import { createFileRoute, useRouterState } from '@tanstack/react-router'
 import { zodValidator } from '@tanstack/zod-adapter'
 import clsx from 'clsx'
@@ -23,6 +23,7 @@ import { rendererApplication } from '@/app/renderer-application'
 import { ChatboxWelcomeCard } from '@/components/common/ChatboxWelcomeCard'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
 import { ImageInStorage } from '@/components/Image'
+import ActionMenu from '@/components/ActionMenu'
 import InputBox, { type InputBoxPayload } from '@/components/InputBox/InputBox'
 import HomepageIcon from '@/components/icons/HomepageIcon'
 import Page from '@/components/layout/Page'
@@ -444,11 +445,53 @@ function Index() {
     return true
   }, [session])
 
+  const setOpenSearchDialog = useUIStore((s) => s.setOpenSearchDialog)
+  const handleHomeNewChat = useCallback(() => {
+    setSession({ id: 'new', ...initEmptyChatSession() })
+  }, [setSession])
+
   const showNewUserScenarios =
     (forceShowNewUserScenarioCards || (hasCompletedFirstSuccessfulChat === false && isLoggedIn)) && !session.copilotId
 
   return (
-    <Page title="">
+    <Page
+      title={isSmallScreen ? '新对话' : ''}
+      right={
+        isSmallScreen ? (
+          <Flex align="center" gap="xs">
+            <ActionIcon
+              variant="subtle"
+              size={24}
+              color="chatbox-secondary"
+              data-testid="home-search-trigger"
+              onClick={() => setOpenSearchDialog(true)}
+            >
+              <IconSearch strokeWidth={1.8} />
+            </ActionIcon>
+            <ActionMenu
+              position="bottom-end"
+              contentTestId="home-header-menu"
+              items={[
+                {
+                  text: '新建对话',
+                  icon: IconMessageCircle2Filled,
+                  onClick: handleHomeNewChat,
+                },
+                {
+                  text: '导出对话',
+                  icon: IconDeviceFloppy,
+                  onClick: () => NiceModal.show('export-chat'),
+                },
+              ]}
+            >
+              <ActionIcon variant="subtle" size={24} color="chatbox-secondary" data-testid="home-header-menu-trigger">
+                <IconDots strokeWidth={1.8} />
+              </ActionIcon>
+            </ActionMenu>
+          </Flex>
+        ) : undefined
+      }
+    >
       <div className="p-0 flex flex-col h-full min-h-0 overflow-hidden">
         <div
           className={clsx('min-h-0 flex-1 overflow-y-auto', welcomeCardMode !== 'none' ? 'pb-36 sm:pb-32' : 'pb-md')}
