@@ -201,8 +201,8 @@ export async function maybeAutoUpdateWorldBooks(
       dialogText,
       loadedWb.map((w) => `- ${w.name}: ${String(w.content ?? '').slice(0, 4000)}`).join('\n'),
       loadedCc.map((c) => `- ${c.name}: ${String(c.backgroundStory ?? '').slice(0, 6000)}`).join('\n'),
-      loadedWb.map((w) => ({ name: w.name, frozen: w.frozenTexts ?? [] })),
-      loadedCc.map((c) => ({ name: c.name, frozen: c.frozenTexts ?? [] }))
+      loadedWb.map((w) => ({ name: w.name, frozen: (w.frozenTexts ?? []).map((x) => (typeof x === 'string' ? x : x.text)) })),
+      loadedCc.map((c) => ({ name: c.name, frozen: (c.frozenTexts ?? []).map((x) => (typeof x === 'string' ? x : x.text)) }))
     )
     const modelResult = await model.chat(
       [
@@ -290,7 +290,7 @@ export async function maybeAutoUpdateWorldBooks(
       if (!existing) continue
       await addOrUpdateWorldBook({
         ...existing,
-        content: applyFrozenProtection(str(item.content) || existing.content, existing.frozenTexts),
+        content: applyFrozenProtection(str(item.content) || existing.content, existing.frozenTexts, 'content'),
         keywords: Array.isArray(item.keywords) && item.keywords.length ? item.keywords.map((k) => String(k)) : existing.keywords,
       })
       result.wbUpdate++
@@ -350,7 +350,7 @@ export async function maybeAutoUpdateWorldBooks(
       if (!existing) continue
       await addOrUpdateCharacterCard({
         ...existing,
-        backgroundStory: applyFrozenProtection(str(item.backgroundStory) || existing.backgroundStory, existing.frozenTexts),
+        backgroundStory: applyFrozenProtection(str(item.backgroundStory) || existing.backgroundStory, existing.frozenTexts, 'backgroundStory'),
         relationships: Array.isArray(item.relationships) && item.relationships.length ? existing.relationships : existing.relationships,
         updatedAt: Date.now(),
       })

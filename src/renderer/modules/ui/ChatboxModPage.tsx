@@ -133,25 +133,28 @@ async function pngToAvatarDataUrl(file: File): Promise<string> {
   }
 }
 
-/** 冻结文本输入：Textarea + 「冻结选中」按钮 + 冻结段列表（点段取消冻结，toggle） */
+/** 冻结文本输入：Textarea + 「冻结选中」按钮 + 冻结段列表（点段取消冻结，toggle，按字段归属） */
 function FrozenTextarea({
-  label, value, onChange, frozenTexts, onFrozenChange, minRows = 6,
+  label, field, value, onChange, frozenTexts, onFrozenChange, minRows = 6,
 }: {
   label: string
+  field: string
   value: string
   onChange: (v: string) => void
-  frozenTexts: string[] | undefined
-  onFrozenChange: (list: string[]) => void
+  frozenTexts: Array<{ field: string; text: string } | string> | undefined
+  onFrozenChange: (list: Array<{ field: string; text: string }>) => void
   minRows?: number
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
-  const list = Array.isArray(frozenTexts) ? frozenTexts : []
+  const mine = (Array.isArray(frozenTexts) ? frozenTexts : [])
+    .map((x) => (typeof x === 'string' ? { field, text: x } : x))
+    .filter((x) => x.field === field)
   const freezeSelection = () => {
     const el = ref.current
     if (!el) return
     const s = el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0)
     if (!s.trim()) return
-    onFrozenChange(toggleFrozen(list, s))
+    onFrozenChange(toggleFrozen(frozenTexts ?? [], field, s))
   }
   return (
     <Box>
@@ -168,17 +171,17 @@ function FrozenTextarea({
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
       />
-      {list.length > 0 ? (
+      {mine.length > 0 ? (
         <Stack gap={4} mt={4}>
-          <Text size="xs" c="dimmed">冻结段（{list.length}）— 自动更新不改写，点段可取消冻结</Text>
-          {list.map((f, i) => (
+          <Text size="xs" c="dimmed">冻结段（{mine.length}）— 自动更新不改写，点段可取消冻结</Text>
+          {mine.map((f, i) => (
             <Box
               key={i}
               style={{ border: '1px solid #f2c1c1', background: '#fff4f4', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', lineHeight: 1.5 }}
-              onClick={() => onFrozenChange(toggleFrozen(list, f))}
+              onClick={() => onFrozenChange(toggleFrozen(frozenTexts ?? [], field, f.text))}
             >
               <Text size="xs" c="red" style={{ wordBreak: 'break-word' }}>
-                🔒 {f.replace(/\s+/g, ' ').slice(0, 42)}{f.length > 42 ? '…' : ''}
+                🔒 {f.text.replace(/\s+/g, ' ').slice(0, 42)}{f.text.length > 42 ? '…' : ''}
               </Text>
             </Box>
           ))}
@@ -558,6 +561,7 @@ export function WorldBooksTab() {
             <TextInput label="名称" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.currentTarget.value })} />
             <FrozenTextarea
               label="内容"
+              field="content"
               value={editing.content}
               onChange={(c) => setEditing({ ...editing, content: c })}
               frozenTexts={editing.frozenTexts}
@@ -1225,16 +1229,17 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       </Group>
       {/* 外貌与性格 */}
       <Divider label="外貌与性格" labelPosition="left" />
-      <Textarea label="外貌" autosize minRows={2} value={card.appearance} onChange={(e) => set({ appearance: e.currentTarget.value })} />
-      <Textarea label="显著特征" autosize minRows={2} value={card.distinguishingFeatures} onChange={(e) => set({ distinguishingFeatures: e.currentTarget.value })} />
-      <Textarea label="性格类型" autosize minRows={2} value={card.personalityType} onChange={(e) => set({ personalityType: e.currentTarget.value })} />
+      <FrozenTextarea label="外貌" field="appearance" value={card.appearance} onChange={(v) => set({ appearance: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
+      <FrozenTextarea label="显著特征" field="distinguishingFeatures" value={card.distinguishingFeatures} onChange={(v) => set({ distinguishingFeatures: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
+      <FrozenTextarea label="性格类型" field="personalityType" value={card.personalityType} onChange={(v) => set({ personalityType: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <Group grow>
-        <Textarea label="优点" autosize minRows={2} value={card.strengths} onChange={(e) => set({ strengths: e.currentTarget.value })} />
-        <Textarea label="缺点" autosize minRows={2} value={card.weaknesses} onChange={(e) => set({ weaknesses: e.currentTarget.value })} />
+        <FrozenTextarea label="优点" field="strengths" value={card.strengths} onChange={(v) => set({ strengths: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
+        <FrozenTextarea label="缺点" field="weaknesses" value={card.weaknesses} onChange={(v) => set({ weaknesses: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       </Group>
-      <Textarea label="爱好" autosize minRows={2} value={card.hobbies} onChange={(e) => set({ hobbies: e.currentTarget.value })} />
+      <FrozenTextarea label="爱好" field="hobbies" value={card.hobbies} onChange={(v) => set({ hobbies: v })} frozenTexts={card.frozenTexts} onFrozenChange={(list) => set({ frozenTexts: list })} minRows={2} />
       <FrozenTextarea
         label="背景故事"
+        field="backgroundStory"
         value={card.backgroundStory}
         onChange={(v) => set({ backgroundStory: v })}
         frozenTexts={card.frozenTexts}
