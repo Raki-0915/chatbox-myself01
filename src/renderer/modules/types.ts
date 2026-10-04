@@ -23,6 +23,8 @@ export interface WorldBookEntry {
   updatedAt?: number
   /** 版本历史（最近 20 份：自动更新/编辑覆盖前压入旧内容，可单条恢复） */
   history?: Array<{ t: number; content: string }>
+  /** 冻结段（原文快照）：自动更新不得改写，按原文匹配保护 */
+  frozenTexts?: string[]
 }
 
 /** 人物卡关系 */
@@ -59,6 +61,8 @@ export interface CharacterCard {
   updatedAt: number
   /** 版本快照（最近 20 份） */
   versionHistory: Array<{ version: number; timestamp: number; snapshot: string }>
+  /** 冻结段（原文快照）：自动更新不得改写，按原文匹配保护 */
+  frozenTexts?: string[]
 }
 
 /** 设定文件夹（世界书/人物卡共用，kind 区分） */

@@ -150,8 +150,6 @@ function DiffUpdateCard({
           {editing ? '编辑中' : '编辑'}
         </Button>
       </Flex>
-      {/* 改点摘要 */}
-      <Text size="xs" c="dimmed" style={{ lineHeight: 1.5, marginBottom: 4 }}>{summary.summary}</Text>
       {/* 旧（只读，滚动看全文；删除词标红删除线） */}
       <Box style={{ border: '1px solid #f0e0e0', borderRadius: 4, background: '#fff9f9', padding: '4px 6px', marginBottom: 4 }}>
         <Text size="xs" c="dimmed" fw={600} style={{ marginBottom: 2 }}>旧（只读）</Text>

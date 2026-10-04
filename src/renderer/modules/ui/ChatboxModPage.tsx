@@ -29,10 +29,10 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBook2, IconBookDownload, IconBookUpload, IconCircleCheck, IconCircleX, IconDownload, IconFolderOpen, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
+import { IconBook2, IconBookDownload, IconBookUpload, IconCircleCheck, IconCircleX, IconDownload, IconFolderOpen, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconSnowflake, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
 import NiceModal from '@ebay/nice-modal-react'
 import { useAtomValue } from 'jotai'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import Page from '@/components/layout/Page'
 import { currentSessionIdAtom } from '@/stores/atoms/sessionAtoms'
@@ -68,6 +68,7 @@ import { forceUnlockAutoUpdate, isAutoUpdateRunning, maybeAutoUpdateWorldBooks }
 import { buildExportPayload, importModData } from '../export'
 import { ExportModal, type ExportModalConfig } from './ExportModal'
 import { isPngBytes, parseCharacterCardJson, parseCharacterCardPng, mapTavernCardToMod } from '../png-character-import'
+import { toggleFrozen } from '../frozen-text'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
 import { MOD_BUILD } from '../version'
@@ -130,6 +131,61 @@ async function pngToAvatarDataUrl(file: File): Promise<string> {
   } catch {
     return dataUrl
   }
+}
+
+/** 冻结文本输入：Textarea + 「冻结选中」按钮 + 冻结段列表（点段取消冻结，toggle） */
+function FrozenTextarea({
+  label, value, onChange, frozenTexts, onFrozenChange, minRows = 6,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  frozenTexts: string[] | undefined
+  onFrozenChange: (list: string[]) => void
+  minRows?: number
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const list = Array.isArray(frozenTexts) ? frozenTexts : []
+  const freezeSelection = () => {
+    const el = ref.current
+    if (!el) return
+    const s = el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0)
+    if (!s.trim()) return
+    onFrozenChange(toggleFrozen(list, s))
+  }
+  return (
+    <Box>
+      <Group justify="space-between" align="center" mb={4}>
+        <Text size="sm" fw={600}>{label}</Text>
+        <Button size="compact-xs" variant="light" color="red" leftSection={<IconSnowflake size={12} />} onClick={freezeSelection}>
+          冻结选中
+        </Button>
+      </Group>
+      <Textarea
+        ref={ref}
+        autosize
+        minRows={minRows}
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+      />
+      {list.length > 0 ? (
+        <Stack gap={4} mt={4}>
+          <Text size="xs" c="dimmed">冻结段（{list.length}）— 自动更新不改写，点段可取消冻结</Text>
+          {list.map((f, i) => (
+            <Box
+              key={i}
+              style={{ border: '1px solid #f2c1c1', background: '#fff4f4', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', lineHeight: 1.5 }}
+              onClick={() => onFrozenChange(toggleFrozen(list, f))}
+            >
+              <Text size="xs" c="red" style={{ wordBreak: 'break-word' }}>
+                🔒 {f.replace(/\s+/g, ' ').slice(0, 42)}{f.length > 42 ? '…' : ''}
+              </Text>
+            </Box>
+          ))}
+        </Stack>
+      ) : null}
+    </Box>
+  )
 }
 
 /** 多选状态管理 */
@@ -500,7 +556,13 @@ export function WorldBooksTab() {
         {editing && (
           <Stack gap="sm">
             <TextInput label="名称" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.currentTarget.value })} />
-            <Textarea label="内容" autosize minRows={6} value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.currentTarget.value })} />
+            <FrozenTextarea
+              label="内容"
+              value={editing.content}
+              onChange={(c) => setEditing({ ...editing, content: c })}
+              frozenTexts={editing.frozenTexts}
+              onFrozenChange={(list) => setEditing({ ...editing, frozenTexts: list })}
+            />
             {editing.triggerMode === 'regex' ? (
               <TextInput
                 label="正则表达式（命中对话文本才注入，如：长安|長安|Chang'an）"
@@ -1171,7 +1233,14 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         <Textarea label="缺点" autosize minRows={2} value={card.weaknesses} onChange={(e) => set({ weaknesses: e.currentTarget.value })} />
       </Group>
       <Textarea label="爱好" autosize minRows={2} value={card.hobbies} onChange={(e) => set({ hobbies: e.currentTarget.value })} />
-      <Textarea label="背景故事" autosize minRows={4} value={card.backgroundStory} onChange={(e) => set({ backgroundStory: e.currentTarget.value })} />
+      <FrozenTextarea
+        label="背景故事"
+        value={card.backgroundStory}
+        onChange={(v) => set({ backgroundStory: v })}
+        frozenTexts={card.frozenTexts}
+        onFrozenChange={(list) => set({ frozenTexts: list })}
+        minRows={4}
+      />
       {/* 关系 */}
       <Divider label="关系" labelPosition="left" />
       {card.relationships.map((r, i) => (

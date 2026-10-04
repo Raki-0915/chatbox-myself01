@@ -6,6 +6,7 @@
  */
 import { getDefaultStore } from 'jotai'
 import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
+import { applyFrozenProtection } from './frozen-text'
 
 export { similarityRatio, SIMILARITY_TRIVIAL }
 
@@ -78,7 +79,21 @@ async function getRecentDialogText(sid: string, n: number): Promise<string> {
 }
 
 /** 自动更新分析提示词（输出 JSON 差异） */
-function buildUpdatePrompt(dialogText: string, loadedWb: string, loadedCc: string): string {
+function buildUpdatePrompt(
+  dialogText: string,
+  loadedWb: string,
+  loadedCc: string,
+  frozenWb: Array<{ name: string; frozen: string[] }> = [],
+  frozenCc: Array<{ name: string; frozen: string[] }> = []
+): string {
+  const frozenSection = (label: string, list: Array<{ name: string; frozen: string[] }>): string => {
+    const rows = list
+      .filter((x) => x.frozen.length > 0)
+      .map((x) => `- ${x.name}：\n${x.frozen.map((f) => `  ⛔ ${f}`).join('\n')}`)
+    return rows.length ? `${label}（以下段落已冻结，update 时必须逐字原样保留，不得改写、不得删除）：\n${rows.join('\n')}` : ''
+  }
+  const frozenWbSec = frozenSection('--- 冻结段（世界书）---', frozenWb)
+  const frozenCcSec = frozenSection('--- 冻结段（人物卡）---', frozenCc)
   return [
     '你是剧情设定维护助手。根据最新剧情对话，对以下"当前设定库"进行增、删、改，输出 JSON 差异。',
     '',
@@ -94,7 +109,8 @@ function buildUpdatePrompt(dialogText: string, loadedWb: string, loadedCc: strin
     '3. update（更新）：已有条目被对话提供新信息或纠正时更新。必须输出合并后的完整内容——保留旧条目全部有效设定，只增补/修正对话中变化的部分，不得删减未被对话推翻的信息。',
     '4. remove（删除）：只删除被对话明确推翻或废弃的条目；不确定就保留。',
     '5. 没有变化就输出空数组。不要编造未出现的信息。',
-    '',
+    frozenWbSec,
+    frozenCcSec,
     '--- 当前世界书 ---',
     loadedWb || '（空）',
     '',
@@ -184,7 +200,9 @@ export async function maybeAutoUpdateWorldBooks(
     const prompt = buildUpdatePrompt(
       dialogText,
       loadedWb.map((w) => `- ${w.name}: ${String(w.content ?? '').slice(0, 4000)}`).join('\n'),
-      loadedCc.map((c) => `- ${c.name}: ${String(c.backgroundStory ?? '').slice(0, 6000)}`).join('\n')
+      loadedCc.map((c) => `- ${c.name}: ${String(c.backgroundStory ?? '').slice(0, 6000)}`).join('\n'),
+      loadedWb.map((w) => ({ name: w.name, frozen: w.frozenTexts ?? [] })),
+      loadedCc.map((c) => ({ name: c.name, frozen: c.frozenTexts ?? [] }))
     )
     const modelResult = await model.chat(
       [
@@ -270,7 +288,11 @@ export async function maybeAutoUpdateWorldBooks(
       const name = str(item.name)
       const existing = wbByName.get(name)
       if (!existing) continue
-      await addOrUpdateWorldBook({ ...existing, content: str(item.content) || existing.content, keywords: Array.isArray(item.keywords) && item.keywords.length ? item.keywords.map((k) => String(k)) : existing.keywords })
+      await addOrUpdateWorldBook({
+        ...existing,
+        content: applyFrozenProtection(str(item.content) || existing.content, existing.frozenTexts),
+        keywords: Array.isArray(item.keywords) && item.keywords.length ? item.keywords.map((k) => String(k)) : existing.keywords,
+      })
       result.wbUpdate++
     }
     for (const name of diff.wb.remove) {
@@ -328,7 +350,7 @@ export async function maybeAutoUpdateWorldBooks(
       if (!existing) continue
       await addOrUpdateCharacterCard({
         ...existing,
-        backgroundStory: str(item.backgroundStory) || existing.backgroundStory,
+        backgroundStory: applyFrozenProtection(str(item.backgroundStory) || existing.backgroundStory, existing.frozenTexts),
         relationships: Array.isArray(item.relationships) && item.relationships.length ? existing.relationships : existing.relationships,
         updatedAt: Date.now(),
       })
