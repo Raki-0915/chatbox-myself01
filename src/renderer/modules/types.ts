@@ -72,6 +72,12 @@ export interface ModFolder {
   kind: 'wb' | 'cc'
 }
 
+/** 自动更新差异：模型算出的增/改/删，供「更新预览」弹窗确认后写回 */
+export interface AutoUpdateDiff {
+  wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
+  cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
+}
+
 /** 自动更新事件日志 */
 export interface ModLogEntry {
   t: number

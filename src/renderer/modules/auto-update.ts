@@ -7,6 +7,7 @@
 import { getDefaultStore } from 'jotai'
 import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
 import { applyFrozenProtection } from './frozen-text'
+import { runConfirmGate } from './confirm-gate'
 
 export { similarityRatio, SIMILARITY_TRIVIAL }
 
@@ -28,7 +29,7 @@ import {
   worldBooksAtom,
   DEFAULT_MOD_SETTINGS,
 } from './store'
-import type { CharacterCard, ModBackup, WorldBookEntry } from './types'
+import type { AutoUpdateDiff, CharacterCard, ModBackup, WorldBookEntry } from './types'
 import { DEFAULT_CHUNK_SIZE, extractJsonBlock, splitTextChunks } from './analyze'
 
 const log = getLogger('mod-auto-update')
@@ -156,10 +157,7 @@ export interface AutoUpdateResult {
 }
 
 /** 更新预览：模型算出的差异，交给 UI 弹窗展示并让用户确认 */
-export interface AutoUpdateDiff {
-  wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
-  cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
-}
+export type { AutoUpdateDiff }
 
 /**
  * 核心入口：触发一次自动更新。
@@ -217,23 +215,15 @@ export async function maybeAutoUpdateWorldBooks(
     }
 
     // 人工确认（可配置）：优先展示「更新预览」供用户逐条勾选（返回勾选后的差异）
+    // 确认门保证：要求确认时，弹窗缺失/异常 → 中止，绝不静默写回
     if (settings.requireConfirm) {
-      if (opts.onPreview) {
-        const picked = await opts.onPreview(diff)
-        if (!picked) {
-          result.ok = false
-          result.error = '已取消'
-          return result
-        }
-        diff = picked
-      } else if (opts.onConfirm) {
-        const confirmed = await opts.onConfirm()
-        if (!confirmed) {
-          result.ok = false
-          result.error = '已取消'
-          return result
-        }
+      const gate = await runConfirmGate(true, { onPreview: opts.onPreview, onConfirm: opts.onConfirm }, diff)
+      if (!gate.ok) {
+        result.ok = false
+        result.error = gate.error
+        return result
       }
+      diff = gate.diff
     }
 
     // 备份快照（应用变更前）
