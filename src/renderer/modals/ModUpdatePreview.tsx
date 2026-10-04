@@ -11,9 +11,10 @@
 import { useMemo, useState } from 'react'
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
 import { getDefaultStore } from 'jotai'
-import { Badge, Box, Button, Checkbox, Divider, Group, Modal, Stack, Text } from '@mantine/core'
+import { Badge, Box, Button, Checkbox, Divider, Flex, Group, Modal, Stack, Text, Textarea } from '@mantine/core'
 import type { AutoUpdateDiff } from '../modules/auto-update'
 import { isTrivialChange } from '../modules/text-similarity'
+import { diffText, summarizeChanges, segmentForOld, segmentForNew } from '../modules/text-diff'
 import { characterCardsAtom, worldBooksAtom } from '../modules/store'
 
 type Sel = { add: Set<number>; update: Set<number>; remove: Set<string> }
@@ -92,9 +93,105 @@ function PickEntryList({
   )
 }
 
-/** 更新条目列表：每条 checkbox + 「旧 → 新」对比；轻微改动条目显示标签且默认未勾选 */
+/** 词级 diff 渲染：将 ops 转成带样式的文本段（旧：删除标红删除线；新：新增标绿下划线） */
+function DiffText({ segments, tone }: { segments: ReturnType<typeof segmentForOld>; tone: 'old' | 'new' }) {
+  return (
+    <Text size="xs" c={tone === 'old' ? 'dimmed' : undefined} style={{ lineHeight: 1.6, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+      {segments.map((seg, i) =>
+        seg.kind === 'del' ? (
+          <Text span key={i} c="red" td="line-through" style={{ background: '#fde2e2', textDecorationThickness: 1.2 }}>{seg.text}</Text>
+        ) : seg.kind === 'ins' ? (
+          <Text span key={i} c="green" td="underline" style={{ background: '#dff5e4', textDecorationThickness: 1.2 }}>{seg.text}</Text>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        )
+      )}
+    </Text>
+  )
+}
+
+/** 更新条目卡片：词级 diff 高亮 + 改点摘要 + 增减统计 + 可编辑「新内容」 */
+function DiffUpdateCard({
+  label, oldTxt, newTxt, checked, isTrivial, editing, editValue, onToggle, onEdit, onDone, onCancel, onEditChange,
+}: {
+  label: string
+  oldTxt: string
+  newTxt: string
+  checked: boolean
+  isTrivial: boolean
+  editing: boolean
+  editValue: string
+  onToggle: () => void
+  onEdit: () => void
+  onDone: () => void
+  onCancel: () => void
+  onEditChange: (v: string) => void
+}) {
+  const ops = useMemo(() => diffText(oldTxt, newTxt), [oldTxt, newTxt])
+  const summary = useMemo(() => summarizeChanges(ops), [ops])
+  const oldSegs = useMemo(() => segmentForOld(ops), [ops])
+  const newSegs = useMemo(() => segmentForNew(ops), [ops])
+  const cardBorder = checked ? (isTrivial ? '1.5px solid #ed8936' : '1.5px solid #2563eb') : isTrivial ? '1px solid #ffe0b2' : '1px solid #e0e0e0'
+  const cardBg = checked ? (isTrivial ? '#fff4e5' : '#eff6ff') : isTrivial ? '#fff8f0' : '#fafafa'
+  return (
+    <Box style={{ border: cardBorder, borderRadius: 6, padding: '6px 8px', background: cardBg }}>
+      {/* 顶部：勾选框 / 名称 / 增减统计 / 编辑按钮 */}
+      <Flex align="center" gap={4} mb={3} style={{ cursor: 'pointer' }} onClick={onToggle}>
+        <Checkbox size="xs" checked={checked} onChange={onToggle} style={{ pointerEvents: 'none' }} />
+        <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{label}</Text>
+        {(summary.del > 0 || summary.ins > 0) && (
+          <Badge size="xs" variant="light" color="red">{`-${summary.del}`}</Badge>
+        )}
+        {(summary.ins > 0) && (
+          <Badge size="xs" variant="light" color="green">{`+${summary.ins}`}</Badge>
+        )}
+        {isTrivial ? <Badge size="xs" color="orange" variant="light">仅轻微改动</Badge> : null}
+        <Button size="compact-xs" variant="subtle" color="chatbox-brand" onClick={(e) => { e.stopPropagation(); onEdit() }}>
+          {editing ? '编辑中' : '编辑'}
+        </Button>
+      </Flex>
+      {/* 改点摘要 */}
+      <Text size="xs" c="dimmed" style={{ lineHeight: 1.5, marginBottom: 4 }}>{summary.summary}</Text>
+      {/* 旧（只读，滚动看全文；删除词标红删除线） */}
+      <Box style={{ border: '1px solid #f0e0e0', borderRadius: 4, background: '#fff9f9', padding: '4px 6px', marginBottom: 4 }}>
+        <Text size="xs" c="dimmed" fw={600} style={{ marginBottom: 2 }}>旧（只读）</Text>
+        <Box style={{ maxHeight: 96, overflow: 'auto' }}>
+          <DiffText segments={oldSegs} tone="old" />
+        </Box>
+      </Box>
+      {/* 新（浏览态 diff 高亮 / 编辑态 textarea） */}
+      <Box style={{ border: '1px solid #e0f0e0', borderRadius: 4, background: '#f7fff7', padding: '4px 6px' }}>
+        <Text size="xs" c="dimmed" fw={600} style={{ marginBottom: 2 }}>新（可编辑）</Text>
+        {editing ? (
+          <>
+            <Textarea
+              size="xs"
+              autosize
+              minRows={3}
+              maxRows={8}
+              value={editValue}
+              onChange={(e) => onEditChange(e.currentTarget.value)}
+              data-testid="update-preview-edit-textarea"
+            />
+            <Flex gap="xs" mt={4} justify="flex-end">
+              <Button size="compact-xs" variant="subtle" onClick={onCancel}>取消</Button>
+              <Button size="compact-xs" color="chatbox-brand" onClick={onDone}>完成</Button>
+            </Flex>
+          </>
+        ) : (
+          <Box style={{ maxHeight: 96, overflow: 'auto' }}>
+            <DiffText segments={newSegs} tone="new" />
+          </Box>
+        )}
+      </Box>
+    </Box>
+  )
+}
+
+/** 更新条目列表：词级 diff 高亮 + 编辑态 + 轻微改动标签 */
 function PickUpdateList({
   title, items, getLabel, selected, onToggle, oldOf, oldField, newField, trivial,
+  editingKey, editValues, onEnterEdit, onDoneEdit, onCancelEdit, onEditChange,
 }: {
   title: string
   items: Array<Record<string, unknown>>
@@ -105,6 +202,12 @@ function PickUpdateList({
   oldField: string
   newField: string
   trivial?: Set<number>
+  editingKey: string | null
+  editValues: Record<string, string>
+  onEnterEdit: (key: string, value: string) => void
+  onDoneEdit: (key: string) => void
+  onCancelEdit: (key: string) => void
+  onEditChange: (key: string, v: string) => void
 }) {
   if (items.length === 0) return null
   return (
@@ -122,26 +225,36 @@ function PickUpdateList({
           const newTxt = String(it[newField] ?? '')
           const isTrivial = Boolean(trivial?.has(i))
           const checked = selected.has(i)
+          const key = `${title}:${label}`
+          const editing = editingKey === key
+          const editValue = editingKey === key ? (editValues[key] ?? newTxt) : newTxt
+          if (!oldIt) {
+            return (
+              <Box key={i} style={{ border: '1px solid #e0e0e0', borderRadius: 6, padding: '6px 8px', background: '#fafafa', cursor: 'pointer' }} onClick={() => onToggle(i)}>
+                <Group gap={4}>
+                  <Checkbox size="xs" checked={checked} onChange={() => onToggle(i)} style={{ pointerEvents: 'none' }} />
+                  <Text size="xs" fw={600}>{label}</Text>
+                  <Text size="xs" c="dimmed">（未找到同名旧条目，此条实际不会执行更新）</Text>
+                </Group>
+              </Box>
+            )
+          }
           return (
-            <Box key={i} style={{ border: checked ? (isTrivial ? '1.5px solid #ed8936' : '1.5px solid #2563eb') : (isTrivial ? '1px solid #ffe0b2' : '1px solid #e0e0e0'), borderRadius: 6, padding: '6px 8px', background: checked ? (isTrivial ? '#fff4e5' : '#eff6ff') : (isTrivial ? '#fff8f0' : '#fafafa'), cursor: 'pointer' }} onClick={() => onToggle(i)}>
-              <Group gap={4} mb={4}>
-                <Checkbox size="xs" checked={checked} onChange={() => onToggle(i)} style={{ pointerEvents: 'none' }} />
-                <Text size="xs" fw={600}>{label}</Text>
-                {isTrivial ? <Badge size="xs" color="orange" variant="light">仅轻微改动</Badge> : null}
-              </Group>
-              {!oldIt ? (
-                <Text size="xs" c="dimmed">（未找到同名旧条目，此条实际不会执行更新）</Text>
-              ) : (
-                <>
-                  <Text size="xs" c="red" style={{ display: 'block' }}>
-                    <Text span fw={600}>旧</Text>：{oldTxt ? clip(oldTxt, 90) : '（空）'}
-                  </Text>
-                  <Text size="xs" c="green" style={{ display: 'block' }}>
-                    <Text span fw={600}>新</Text>：{newTxt ? clip(newTxt, 90) : '（空）'}
-                  </Text>
-                </>
-              )}
-            </Box>
+            <DiffUpdateCard
+              key={i}
+              label={label}
+              oldTxt={oldTxt}
+              newTxt={newTxt}
+              checked={checked}
+              isTrivial={isTrivial}
+              editing={editing}
+              editValue={editValue}
+              onToggle={() => onToggle(i)}
+              onEdit={() => onEnterEdit(key, newTxt)}
+              onDone={() => onDoneEdit(key)}
+              onCancel={() => onCancelEdit(key)}
+              onEditChange={(v) => onEditChange(key, v)}
+            />
           )
         })}
         {items.length > 20 ? <Text size="xs" c="dimmed">… 其余 {items.length - 20} 条省略</Text> : null}
@@ -282,8 +395,26 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     wb: newSelFiltered(diff.wb.add.length, diff.wb.update.length, diff.wb.remove, trivialWb),
     cc: newSelFiltered(diff.cc.add.length, diff.cc.update.length, diff.cc.remove, trivialCc),
   }))
+  // 编辑态：editingKey = `${group}:${name}`；editedMap 存「本次要应用的新内容」
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editedMap, setEditedMap] = useState<Record<string, string>>({})
   const wbName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
   const ccName = (x: Record<string, unknown>) => String(x.name ?? '（未命名）')
+
+  const enterEdit = (key: string, value: string) => {
+    setEditingKey(key)
+    setEditedMap((m) => (m[key] === undefined ? { ...m, [key]: value } : m))
+  }
+  const doneEdit = (key: string) => setEditingKey(null)
+  const cancelEdit = (key: string) => {
+    setEditingKey(null)
+    setEditedMap((m) => {
+      const next = { ...m }
+      delete next[key]
+      return next
+    })
+  }
+  const changeEdit = (key: string, v: string) => setEditedMap((m) => ({ ...m, [key]: v }))
 
   const total = diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length +
     diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length
@@ -322,15 +453,23 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     if (busy || selTotal === 0) return
     setBusy(true)
     const pick = <T,>(arr: T[], s: Set<number>) => arr.filter((_, i) => s.has(i))
+    // 勾选并编辑过的 update 条目，用编辑后文本覆盖对应字段（content / backgroundStory）
+    const override = (group: 'wb' | 'cc', items: Array<Record<string, unknown>>, field: string) =>
+      items.map((it, i) => {
+        const key = `${group === 'wb' ? '更新' : '更新'}:${String(it.name ?? '')}`
+        const edited = editedMap[key]
+        if (edited === undefined || edited === String(it[field] ?? '')) return it
+        return { ...it, [field]: edited }
+      })
     const result: AutoUpdateDiff = {
       wb: {
         add: pick(diff.wb.add, sel.wb.add),
-        update: pick(diff.wb.update, sel.wb.update),
+        update: override('wb', pick(diff.wb.update, sel.wb.update), 'content'),
         remove: diff.wb.remove.filter((n) => sel.wb.remove.has(n)),
       },
       cc: {
         add: pick(diff.cc.add, sel.cc.add),
-        update: pick(diff.cc.update, sel.cc.update),
+        update: override('cc', pick(diff.cc.update, sel.cc.update), 'backgroundStory'),
         remove: diff.cc.remove.filter((n) => sel.cc.remove.has(n)),
       },
     }
@@ -371,6 +510,8 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
                 title="更新" items={diff.wb.update} getLabel={wbName} selected={sel.wb.update}
                 onToggle={(i) => toggle('wb', 'update', i)} oldOf={oldLookup.wbOf} oldField="content" newField="content"
                 trivial={trivialWb}
+                editingKey={editingKey} editValues={editedMap}
+                onEnterEdit={enterEdit} onDoneEdit={doneEdit} onCancelEdit={cancelEdit} onEditChange={changeEdit}
               />
               <PickRemoveList title="删除" names={diff.wb.remove} selected={sel.wb.remove} onToggle={(n) => toggleRemove('wb', n)} summaryOf={(n) => String(oldLookup.wbOf(n)?.content ?? '')} />
               {hasCc && <Divider label="人物卡" labelPosition="left" />}
@@ -379,6 +520,8 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
                 title="更新" items={diff.cc.update} getLabel={ccName} selected={sel.cc.update}
                 onToggle={(i) => toggle('cc', 'update', i)} oldOf={oldLookup.ccOf} oldField="backgroundStory" newField="backgroundStory"
                 trivial={trivialCc}
+                editingKey={editingKey} editValues={editedMap}
+                onEnterEdit={enterEdit} onDoneEdit={doneEdit} onCancelEdit={cancelEdit} onEditChange={changeEdit}
               />
               <PickRemoveList title="删除" names={diff.cc.remove} selected={sel.cc.remove} onToggle={(n) => toggleRemove('cc', n)} summaryOf={(n) => String(oldLookup.ccOf(n)?.backgroundStory ?? '')} />
             </Stack>
