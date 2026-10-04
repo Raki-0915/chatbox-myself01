@@ -140,3 +140,15 @@ export interface ModSettings {
 export type ModTarget =
   | { mode: 'follow' }
   | { mode: 'fixed'; sid: string; name: string }
+
+/** 对话存档分支点（Bookmark Branches）：会话级，独立于消息本体，删除消息时联动清理 */
+export interface SessionBookmark {
+  id: string
+  sessionId: string
+  messageId: string
+  timestamp: number
+  /** 用户备注（可选） */
+  label?: string
+  /** 消息内容简短预览 */
+  preview: string
+}

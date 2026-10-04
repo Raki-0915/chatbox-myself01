@@ -269,6 +269,13 @@ export async function removeMessage(sessionId: string, messageId: string) {
     }
     clearMessageGenerationStopOperation(sessionId, messageId)
   })
+  // Mod：删除消息 → 联动清理该消息的对话存档分支点（不残留失效跳转）
+  try {
+    const { removeBookmarksByMessageIds } = await import('@/modules/store')
+    await removeBookmarksByMessageIds(sessionId, [messageId])
+  } catch (e) {
+    console.warn('mod: failed to clean bookmarks after message delete', e)
+  }
 }
 
 /**

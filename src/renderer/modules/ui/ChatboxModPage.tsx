@@ -1302,10 +1302,12 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
     <Stack gap="sm" className="cc-editor">
       {/* 编辑弹窗排版优化：整体字号调小（框大小不变），避免长文本/窄栏截断 */}
       <style>{`
-        .cc-editor input, .cc-editor textarea { font-size: 13px; }
-        .cc-editor label { font-size: 12px; }
-        .cc-editor .mantine-InputWrapper-label { font-size: 12px; }
-        .cc-editor .mantine-Input-section { font-size: 12px; }
+        .cc-editor input, .cc-editor textarea { font-size: 12px; }
+        .cc-editor label { font-size: 11px; }
+        .cc-editor .mantine-InputWrapper-label { font-size: 11px; }
+        .cc-editor .mantine-Input-section { font-size: 11px; }
+        .cc-editor .mantine-Switch-label { font-size: 12px; }
+        .cc-editor .mantine-Button-label { font-size: 12px; }
       `}</style>
       <Switch
         label="冻结模式（整段选择冻结）"

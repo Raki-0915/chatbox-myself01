@@ -361,6 +361,31 @@ const SessionSettingsModal = NiceModal.create(
                 ) : null}
               </Flex>
             </Stack>
+
+            {/* Mod：对话存档分支点入口 */}
+            <Stack gap={4}>
+              <Flex align="center" justify="space-between">
+                <Stack gap={0}>
+                  <Text size="sm" fw={600}>
+                    存档分支点
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    回看/跳转对话中打下的存档点
+                  </Text>
+                </Stack>
+                <Button
+                  size="compact-sm"
+                  variant="default"
+                  onClick={() => {
+                    if (session) {
+                      void NiceModal.show('mod-bookmark-list', { session })
+                    }
+                  }}
+                >
+                  查看存档分支点
+                </Button>
+              </Flex>
+            </Stack>
           </Stack>
         </div>
 

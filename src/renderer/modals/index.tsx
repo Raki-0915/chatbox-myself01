@@ -8,6 +8,7 @@ import ConfirmModal from './ConfirmModal'
 import ContentViewer from './ContentViewer'
 import CreativeLoadSheet from './CreativeLoadSheet'
 import ModUpdatePreview from './ModUpdatePreview'
+import ModBookmarkList from './ModBookmarkList'
 import ExportChat from './ExportChat'
 import FileParseError from './FileParseError'
 import JsonViewer from './JsonViewer'
@@ -26,6 +27,7 @@ NiceModal.register('content-viewer', ContentViewer)
 NiceModal.register('session-settings', SessionSettings)
 NiceModal.register('creative-load-sheet', CreativeLoadSheet)
 NiceModal.register('mod-update-preview', ModUpdatePreview)
+NiceModal.register('mod-bookmark-list', ModBookmarkList)
 NiceModal.register('app-store-rating', AppStoreRating)
 NiceModal.register('artifact-preview', ArtifactPreview)
 NiceModal.register('clear-session-list', ClearSessionList)

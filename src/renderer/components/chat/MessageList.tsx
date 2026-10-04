@@ -11,8 +11,9 @@ import {
   shouldConfirmPromptCacheBreakForDelete,
 } from '@chatbox/core/session/prompt-cache-policy'
 import NiceModal from '@ebay/nice-modal-react'
-import { Button, Flex, Stack, Transition } from '@mantine/core'
+import { Button, Flex, Stack, Text, Transition } from '@mantine/core'
 import { useThrottledCallback } from '@mantine/hooks'
+import { IconGitBranch } from '@tabler/icons-react'
 import { TestId } from '@shared/automation/testids'
 import type { Session, Message as SessionMessage, SessionThreadBrief } from '@shared/types'
 import {
@@ -50,6 +51,10 @@ import { getSessionAgentModeEntry } from '@/stores/session/agent-mode'
 import { removeMessage } from '@/stores/session/messages'
 import { moveThreadToConversations, removeThread, switchThread } from '@/stores/session/threads'
 import { getAllMessageList, getCurrentThreadHistoryHash } from '@/stores/sessionHelpers'
+// Mod：对话存档分支点
+import { sessionBookmarks } from '@/modules/branches'
+import { bookmarksAtom, bookmarkJumpRequestAtom, setBookmarkJumpRequest, toggleSessionBookmark } from '@/modules/store'
+import { getMessageText } from '@shared/utils/message'
 import { settingsStore, useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { evaluatePromptCacheDeleteContext } from '@/utils/prompt-cache-confirm'
@@ -123,6 +128,58 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
   )
   const currentMessageList = useMemo(() => getAllMessageList(currentSession), [currentSession])
   const sessionLocks = useSessionLockState(currentSession)
+
+  // Mod：对话存档分支点 —— 会话内已打点消息集合 + 多选删除状态 + 跳转请求
+  const bookmarks = useAtomValue(bookmarksAtom)
+  const bookmarkedIds = useMemo(
+    () => new Set(sessionBookmarks(bookmarks, currentSession.id).map((b) => b.messageId)),
+    [bookmarks, currentSession.id]
+  )
+  const [multiSelect, setMultiSelect] = useState<{ active: boolean; ids: Set<string> }>({
+    active: false,
+    ids: new Set(),
+  })
+  const toggleSelectMessage = useCallback((messageId: string) => {
+    setMultiSelect((s) => {
+      const ids = new Set(s.ids)
+      if (ids.has(messageId)) ids.delete(messageId)
+      else ids.add(messageId)
+      return { ...s, ids }
+    })
+  }, [])
+  const exitMultiSelect = useCallback(() => setMultiSelect({ active: false, ids: new Set() }), [])
+  const onToggleBookmark = useCallback(
+    async (messageId: string) => {
+      const msg = currentMessageList.find((m) => m.id === messageId)
+      const preview = msg ? getMessageText(msg).slice(0, 80) : ''
+      await toggleSessionBookmark(currentSession.id, messageId, preview)
+    },
+    [currentSession.id, currentMessageList]
+  )
+  const onMultiDelete = useCallback(async () => {
+    const ids = [...multiSelect.ids]
+    if (!ids.length) return
+    exitMultiSelect()
+    for (const id of ids) {
+      try {
+        // 官方删除路径内部会联动清理该消息的存档点
+        await removeMessage(currentSession.id, id)
+      } catch {
+        /* 逐条容错 */
+      }
+    }
+  }, [currentSession.id, multiSelect.ids, exitMultiSelect])
+  const bookmarkJump = useAtomValue(bookmarkJumpRequestAtom)
+  useEffect(() => {
+    if (bookmarkJump && bookmarkJump.sessionId === currentSession.id) {
+      // 消费后清空，避免重复跳转
+      void setBookmarkJumpRequest(null)
+      window.setTimeout(() => {
+        const r = ref as React.RefObject<MessageListRef> | null
+        r?.current?.scrollToMessage(bookmarkJump.messageId)
+      }, 120)
+    }
+  }, [bookmarkJump, currentSession.id])
   // Resolved once per session snapshot and passed down as a plain prop: with
   // multi-thousand-row sessions, per-row store subscriptions would re-run a
   // selector on every streaming chunk. Mode changes rewrite session.settings,
@@ -582,6 +639,13 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
                 allowGeneratingStop
                 assistantAvatarKey={currentSession.assistantAvatarKey}
                 sessionPicUrl={currentSession.picUrl}
+                bookmarked={bookmarkedIds.has(msg.id)}
+                highlighted={msg.id === highlightedMessageId}
+                selectionMode={multiSelect.active}
+                selected={multiSelect.ids.has(msg.id)}
+                onToggleSelect={toggleSelectMessage}
+                onToggleBookmark={(mid) => void onToggleBookmark(mid)}
+                onEnterMultiSelect={() => setMultiSelect((s) => ({ active: true, ids: s.ids }))}
               />
             )}
           </ErrorBoundary>
@@ -599,6 +663,10 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
       showThreadHistory,
       latestSummaryMessageId,
       highlightedMessageId,
+      bookmarkedIds,
+      multiSelect,
+      toggleSelectMessage,
+      onToggleBookmark,
       t,
     ]
   )
@@ -703,6 +771,41 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
           />
 
           {showMinimap && <MessageMinimapRail anchors={userMessageAnchors} onJump={handleMinimapJump} />}
+
+          {/* Mod：多选删除模式 —— 顶部批量操作栏 */}
+          {multiSelect.active && (
+            <Flex
+              className="absolute z-30 top-0 left-0 right-0 bg-chatbox-background-secondary"
+              gap={6}
+              align="center"
+              px="sm"
+              py={6}
+            >
+              <Text size="xs" fw={600} className="flex-1 min-w-0 truncate">
+                {t('已选 {{count}} 条', { count: multiSelect.ids.size })}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                onClick={() =>
+                  setMultiSelect((s) => ({ active: true, ids: new Set(currentMessageList.map((m) => m.id)) }))
+                }
+              >
+                {t('全选')}
+              </Button>
+              <Button
+                size="compact-xs"
+                color="red"
+                disabled={!multiSelect.ids.size}
+                onClick={() => void onMultiDelete()}
+              >
+                {t('删除')}
+              </Button>
+              <Button size="compact-xs" variant="subtle" onClick={exitMultiSelect}>
+                {t('退出')}
+              </Button>
+            </Flex>
+          )}
 
           {!isSmallScreen ? (
             <MessageNavigation

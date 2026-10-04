@@ -30,6 +30,7 @@ import {
   IconCode,
   IconCopy,
   IconDotsVertical,
+  IconGitBranch,
   IconInfoCircle,
   IconLoader2,
   IconMessageReport,
@@ -139,6 +140,20 @@ interface Props {
   small?: boolean
   assistantAvatarKey?: string
   sessionPicUrl?: string
+  /** Mod：该消息已打对话存档分支点 */
+  bookmarked?: boolean
+  /** Mod：跳转定位后的短暂高亮 */
+  highlighted?: boolean
+  /** Mod：多选删除选择模式（点击整卡切换选中） */
+  selectionMode?: boolean
+  /** Mod：选择模式下已选中 */
+  selected?: boolean
+  /** Mod：选择模式点击整卡切换选中 */
+  onToggleSelect?: (messageId: string) => void
+  /** Mod：打点/取消存档点 */
+  onToggleBookmark?: (messageId: string) => void
+  /** Mod：进入多选删除模式 */
+  onEnterMultiSelect?: () => void
 }
 
 const BackgroundTaskNotificationUI: FC<{ task: MessageBackgroundTask; className?: string }> = ({ task, className }) => {
@@ -186,6 +201,13 @@ const _Message: FC<Props> = (props) => {
     small,
     assistantAvatarKey,
     sessionPicUrl,
+    bookmarked = false,
+    highlighted = false,
+    selectionMode = false,
+    selected = false,
+    onToggleSelect,
+    onToggleBookmark,
+    onEnterMultiSelect,
   } = props
 
   const { t } = useTranslation()
@@ -674,6 +696,15 @@ const _Message: FC<Props> = (props) => {
     })
   }
 
+  // Mod：对话存档分支点 —— 长按/右键消息打开操作菜单（选择模式不弹菜单，改为整卡勾选）
+  const handleMessageContextMenu: MouseEventHandler<HTMLDivElement> = (e) => {
+    e.preventDefault()
+    if (!selectionMode) setActionMenuOpened(true)
+  }
+  const handleMessageClick = () => {
+    if (selectionMode) onToggleSelect?.(msg.id)
+  }
+
   const actionMenuItems = useMemo<ActionMenuItemProps[]>(
     () => [
       ...(isSmallScreen
@@ -741,6 +772,18 @@ const _Message: FC<Props> = (props) => {
             },
           ]
         : []),
+      // Mod：对话存档分支点 —— 打点/取消 + 多选删除（独立于「存为分支点」入口）
+      {
+        text: bookmarked ? t('取消存档点') : t('存为分支点'),
+        icon: IconGitBranch,
+        onClick: () => onToggleBookmark?.(msg.id),
+      },
+      { divider: true },
+      {
+        text: t('多选删除'),
+        icon: IconTrash,
+        onClick: () => onEnterMultiSelect?.(),
+      },
       ...(canDeleteMessage
         ? [
             {
@@ -776,6 +819,9 @@ const _Message: FC<Props> = (props) => {
       canEditMessage,
       canDeleteMessage,
       confirmCacheBreakingDelete,
+      bookmarked,
+      onToggleBookmark,
+      onEnterMultiSelect,
     ]
   )
   const [actionMenuOpened, setActionMenuOpened] = useState(false)
@@ -1272,6 +1318,14 @@ const _Message: FC<Props> = (props) => {
           </Text>
         </Flex>
       )}
+      {bookmarked && (
+        <Flex align="center" gap={4} justify={isRightAlignedMessage ? 'flex-end' : 'flex-start'}>
+          <IconGitBranch size={11} className="text-[var(--mantine-color-chatbox-brand-filled)] flex-shrink-0" />
+          <Text size="xs" c="chatbox-brand">
+            {t('存档点')}
+          </Text>
+        </Flex>
+      )}
     </Flex>
   )
 
@@ -1287,6 +1341,8 @@ const _Message: FC<Props> = (props) => {
         ref={ref}
         id={props.id}
         key={msg.id}
+        onContextMenu={handleMessageContextMenu}
+        onClick={handleMessageClick}
         className={cn(
           'group/message',
           'msg-block',
@@ -1296,11 +1352,17 @@ const _Message: FC<Props> = (props) => {
           msg.generating ? 'rendering' : 'render-done',
           messageRoleClass,
           className,
-          'w-full'
+          'w-full',
+          selectionMode && 'cursor-pointer',
+          bookmarked && '!bg-chatbox-background-brand-secondary',
         )}
         sx={{
           paddingBottom: '0.1rem',
           paddingX: '1rem',
+          ...(highlighted
+            ? { boxShadow: '0 0 0 2px var(--mantine-color-chatbox-brand-filled)', borderRadius: '8px' }
+            : {}),
+          ...(selected ? { boxShadow: 'inset 0 0 0 2px var(--mantine-color-chatbox-brand-filled)', borderRadius: '8px' } : {}),
           [theme.breakpoints.down('sm')]: {
             paddingX: '0.3rem',
           },
@@ -1336,6 +1398,8 @@ const _Message: FC<Props> = (props) => {
         ref={ref}
         id={props.id}
         key={msg.id}
+        onContextMenu={handleMessageContextMenu}
+        onClick={handleMessageClick}
         className={cn(
           'group/message',
           'msg-block',
@@ -1343,11 +1407,17 @@ const _Message: FC<Props> = (props) => {
           msg.generating ? 'rendering' : 'render-done',
           messageRoleClass,
           className,
-          'w-full'
+          'w-full',
+          selectionMode && 'cursor-pointer',
+          bookmarked && '!bg-chatbox-background-brand-secondary',
         )}
         sx={{
           paddingBottom: '0.1rem',
           paddingX: '1rem',
+          ...(highlighted
+            ? { boxShadow: '0 0 0 2px var(--mantine-color-chatbox-brand-filled)', borderRadius: '8px' }
+            : {}),
+          ...(selected ? { boxShadow: 'inset 0 0 0 2px var(--mantine-color-chatbox-brand-filled)', borderRadius: '8px' } : {}),
           [theme.breakpoints.down('sm')]: {
             paddingX: '0.3rem',
           },
@@ -1396,6 +1466,8 @@ const _Message: FC<Props> = (props) => {
       ref={ref}
       id={props.id}
       key={msg.id}
+      onContextMenu={handleMessageContextMenu}
+      onClick={handleMessageClick}
       className={cn(
         'group/message',
         'msg-block',
@@ -1404,11 +1476,17 @@ const _Message: FC<Props> = (props) => {
         msg.generating ? 'rendering' : 'render-done',
         messageRoleClass,
         className,
-        'w-full'
+        'w-full',
+        selectionMode && 'cursor-pointer',
+        bookmarked && '!bg-chatbox-background-brand-secondary',
+        selected && 'outline outline-2 outline-chatbox-brand'
       )}
       sx={{
         paddingBottom: '0.1rem',
         paddingX: '1rem',
+        ...(highlighted
+          ? { boxShadow: '0 0 0 2px var(--mantine-color-chatbox-brand-filled)', borderRadius: '8px' }
+          : {}),
         [theme.breakpoints.down('sm')]: {
           paddingX: '0.3rem',
         },

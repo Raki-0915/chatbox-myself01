@@ -7,7 +7,8 @@
 import { atom } from 'jotai'
 import { v4 as uuidv4 } from 'uuid'
 import { MOD_STORAGE_KEYS, modGetItem, modSetItem } from './storage'
-import type { CharacterCard, ModBackup, ModFolder, ModLogEntry, ModSettings, WorldBookEntry } from './types'
+import type { CharacterCard, ModBackup, ModFolder, ModLogEntry, ModSettings, SessionBookmark, WorldBookEntry } from './types'
+import { clearSessionBookmarks, dropBookmarksForMessages, toggleBookmark } from './branches'
 
 /* ======================== 默认值 ======================== */
 
@@ -30,6 +31,8 @@ export const foldersAtom = atom<ModFolder[]>([])
 export const modSettingsAtom = atom<ModSettings>(DEFAULT_MOD_SETTINGS)
 export const modLogAtom = atom<ModLogEntry[]>([])
 export const modBackupsAtom = atom<ModBackup[]>([])
+/** 对话存档分支点（会话级） */
+export const bookmarksAtom = atom<SessionBookmark[]>([])
 
 /** 是否已从存储加载过（避免并发重复加载） */
 let loaded = false
@@ -40,13 +43,14 @@ export async function loadModStore(): Promise<void> {
   if (loaded) return
   if (loadPromise) return loadPromise
   loadPromise = (async () => {
-    const [wb, cc, folders, settings, log, backups] = await Promise.all([
+    const [wb, cc, folders, settings, log, backups, bookmarks] = await Promise.all([
       modGetItem<WorldBookEntry[]>(MOD_STORAGE_KEYS.worldBooks, []),
       modGetItem<CharacterCard[]>(MOD_STORAGE_KEYS.characterCards, []),
       modGetItem<ModFolder[]>(MOD_STORAGE_KEYS.folders, []),
       modGetItem<ModSettings>(MOD_STORAGE_KEYS.settings, DEFAULT_MOD_SETTINGS),
       modGetItem<ModLogEntry[]>(MOD_STORAGE_KEYS.log, []),
       modGetItem<ModBackup[]>(MOD_STORAGE_KEYS.backups, []),
+      modGetItem<SessionBookmark[]>(MOD_STORAGE_KEYS.bookmarks, []),
     ])
     // 直接写 atom 初始值（getDefaultStore 在 renderer 中可用）
     const { getDefaultStore } = await import('jotai')
@@ -57,6 +61,7 @@ export async function loadModStore(): Promise<void> {
     store.set(modSettingsAtom, { ...DEFAULT_MOD_SETTINGS, ...settings })
     store.set(modLogAtom, log)
     store.set(modBackupsAtom, backups)
+    store.set(bookmarksAtom, bookmarks)
     loaded = true
   })()
   return loadPromise
@@ -402,4 +407,57 @@ export async function restoreModBackup(index: number): Promise<{ ok: boolean; do
   } catch (e) {
     return { ok: false, done, failed, error: String((e as Error)?.message ?? e) }
   }
+}
+
+/* ======================== 对话存档分支点 CRUD ======================== */
+
+async function persistBookmarks(next: SessionBookmark[]): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  store.set(bookmarksAtom, next)
+  await modSetItem(MOD_STORAGE_KEYS.bookmarks, next)
+}
+
+/** 打点/取消（toggle）。返回是否新增（true=打点，false=取消） */
+export async function toggleSessionBookmark(
+  sessionId: string,
+  messageId: string,
+  preview: string,
+  label?: string
+): Promise<{ added: boolean }> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const { list, added } = toggleBookmark(store.get(bookmarksAtom), sessionId, messageId, preview, label)
+  await persistBookmarks(list)
+  return { added }
+}
+
+/** 删除消息 → 联动清理对应存档点（多选删除传多条 messageId） */
+export async function removeBookmarksByMessageIds(sessionId: string, messageIds: string[]): Promise<void> {
+  if (!messageIds.length) return
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const next = dropBookmarksForMessages(store.get(bookmarksAtom), sessionId, messageIds)
+  if (next.length === store.get(bookmarksAtom).length) return
+  await persistBookmarks(next)
+}
+
+/** 清空某会话全部存档点 */
+export async function clearSessionBookmarksStore(sessionId: string): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  const store = getDefaultStore()
+  const next = clearSessionBookmarks(store.get(bookmarksAtom), sessionId)
+  if (next.length === store.get(bookmarksAtom).length) return
+  await persistBookmarks(next)
+}
+
+/* ======================== 存档点跳转请求（UI 跨组件信号） ======================== */
+
+/** 存档点列表弹窗 → MessageList：请求滚动定位某消息 */
+export const bookmarkJumpRequestAtom = atom<{ sessionId: string; messageId: string } | null>(null)
+
+/** 发起跳转请求（弹窗点击存档点时调用） */
+export async function setBookmarkJumpRequest(target: { sessionId: string; messageId: string } | null): Promise<void> {
+  const { getDefaultStore } = await import('jotai')
+  getDefaultStore().set(bookmarkJumpRequestAtom, target)
 }
