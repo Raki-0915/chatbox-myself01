@@ -30,7 +30,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import { type RemoteConfig, Theme } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
-import { useSetAtom } from 'jotai'
+import { useSetAtom, useAtomValue } from 'jotai'
 import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { trackJkViewEvent } from '@/analytics/jk'
@@ -50,6 +50,7 @@ import useShortcut from '@/hooks/useShortcut'
 import useVersion from '@/hooks/useVersion'
 import '@/modals'
 import { rendererApplication } from '@/app/renderer-application'
+import { modSettingsAtom } from '@/modules/store'
 import DbSchemaGuardDialog from '@/components/DbSchemaGuardDialog'
 import SettingsModal from '@/modals/Settings'
 import { navigateToSettings } from '@/modals/settings-navigation'
@@ -736,6 +737,8 @@ export const Route = createRootRoute({
     const theme = useAppTheme()
     const _theme = useTheme()
     const fontSize = useSettingsStore((state) => state.fontSize)
+    // Chatbox Mod: 聊天模式（群聊）强制深色主题
+    const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
     useEffect(() => {
       document.documentElement.style.setProperty('--chatbox-msg-font-size', `${fontSize}px`)
     }, [fontSize])
@@ -745,6 +748,7 @@ export const Route = createRootRoute({
       <MantineProvider
         theme={mantineTheme}
         defaultColorScheme={_theme === Theme.Dark ? 'dark' : _theme === Theme.Light ? 'light' : 'auto'}
+        forceColorScheme={modChatMode === 'group' ? 'dark' : undefined}
       >
         <AppProviders>
           <ThemeProvider theme={theme}>

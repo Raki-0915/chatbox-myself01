@@ -51,6 +51,8 @@ import {
   trackWebSearchClick,
 } from '@/analytics/agent-mode'
 import { rendererApplication } from '@/app/renderer-application'
+import { useAtomValue } from 'jotai'
+import { modSettingsAtom, updateModSettings } from '@/modules/store'
 import { AppTooltip as Tooltip } from '@/components/ui/tooltip'
 import { useKnowledgeBases } from '@/hooks/knowledge-base'
 import { useMCPServerStatus, useToggleMCPServer } from '@/hooks/mcp'
@@ -220,6 +222,8 @@ const AgentModePanel = forwardRef<AgentModePanelHandle, AgentModePanelProps>(fun
 ) {
   const isTouchLayout = layout === 'touch'
   const showModeSwitcher = platform.isDesktopLike
+  // Chatbox Mod: 移动端模式（创作模式/聊天模式），聊天模式强制深色主题
+  const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
   const showDesktopCapabilityHint = !platform.isDesktopLike
   const showCodeExecution = featureFlags.agentMode
   const showSkills = featureFlags.skills
@@ -1201,17 +1205,34 @@ const AgentModePanel = forwardRef<AgentModePanelHandle, AgentModePanelProps>(fun
                 </Text>
               </>
             ) : (
-              <Flex align="flex-start" gap="sm" className="rounded-lg bg-chatbox-background-secondary px-2 py-1.5">
-                <AgentModeStatusIcon mode="off" size={14} className="mt-0.5 shrink-0" />
-                <Stack gap={2} className="min-w-0">
-                  <Text size="sm" fw={500} c="chatbox-primary">
-                    {t('Chat Mode')}
-                  </Text>
-                  <Text size="xs" c="chatbox-secondary" className="leading-snug">
-                    {t('This app currently supports Chat Mode only. Use Work Mode on the desktop app.')}
-                  </Text>
-                </Stack>
-              </Flex>
+              <>
+                {/* Chatbox Mod: 移动端模式选择 —— 创作模式（原对话模式改名，浅色）| 聊天模式（群聊，强制深色主题） */}
+                <Flex gap={6}>
+                  <Button
+                    size="xs"
+                    variant={modChatMode === 'creation' ? 'filled' : 'default'}
+                    color={modChatMode === 'creation' ? 'chatbox-brand' : undefined}
+                    fullWidth
+                    onClick={() => void updateModSettings({ chatMode: 'creation' })}
+                  >
+                    创作模式
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={modChatMode === 'group' ? 'filled' : 'default'}
+                    color={modChatMode === 'group' ? 'chatbox-brand' : undefined}
+                    fullWidth
+                    onClick={() => void updateModSettings({ chatMode: 'group' })}
+                  >
+                    聊天模式
+                  </Button>
+                </Flex>
+                <Text size="xs" c="chatbox-secondary" className="leading-snug max-w-[244px]">
+                  {modChatMode === 'group'
+                    ? '聊天模式：群聊 · 深色主题（工作模式仍仅桌面端可用）'
+                    : '创作模式：世界书/人物卡、自动更新、小说续写（工作模式仍仅桌面端可用）'}
+                </Text>
+              </>
             )}
             {showModeSwitcher && isChatModeSelected && (
               <Flex

@@ -101,6 +101,8 @@ export interface ModSettings {
   ccInjectionLimit: number
   /** 硅基流动（SiliconFlow）API Key（用户自填，仅本地保存） */
   siliconflowApiKey?: string
+  /** 移动端模式：创作模式（现有对话模式改名，浅色主题）| 聊天模式（群聊，强制深色主题） */
+  chatMode?: 'creation' | 'group'
 }
 
 /** 会话装载目标 */
