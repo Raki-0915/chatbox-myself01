@@ -7,6 +7,7 @@
 import { getDefaultStore } from 'jotai'
 import { characterCardsAtom, modSettingsAtom, worldBooksAtom } from './store'
 import type { CharacterCard, WorldBookEntry } from './types'
+import { buildAssociatedEventSection } from './event-split'
 
 /** 读取目标会话装载的条目（enabled 且 id 命中） */
 function getEnabledByIds<T extends { id: string; enabled?: boolean }>(all: T[], ids: string[]): T[] {
@@ -65,7 +66,9 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
     const cc = getEnabledByIds(allCc, characterCardIds ?? [])
     // 注入体积自适应：对话越长预算越小（常驻优先，场景占剩余）
     const ccBudget = adaptiveInjectionBudget(settings.ccInjectionLimit, dialogText.length)
-    const ccSection = buildCharacterCardSection(cc, dialogText, ccBudget)
+    // 背景区（人设稳定内容）与关联事件区（关键词触发，仅命中时出现）分预算
+    const ccSection = buildCharacterCardSection(cc, dialogText, Math.floor(ccBudget * 0.75))
+    const eventSection = buildAssociatedEventSection(cc, dialogText, Math.floor(ccBudget * 0.35))
     const wbBudget = adaptiveInjectionBudget(settings.wbInjectionLimit, dialogText.length)
     const residentLimit = Math.min(Math.floor(wbBudget * 0.6), settings.wbInjectionLimit)
     const { resident, scene } = splitWorldBookSections(wb, dialogText, settings.wbInjectionLimit)
@@ -75,7 +78,7 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
     if (res) wbParts.push(`## World Book · 常驻设定\n${res}`)
     if (sc) wbParts.push(`## World Book · 场景触发\n${sc}`)
     const wbSection = wbParts.join('\n\n')
-    const parts = [ccSection, wbSection].filter(Boolean)
+    const parts = [ccSection, eventSection, wbSection].filter(Boolean)
     return parts.length ? parts.join('\n\n') : ''
   } catch {
     return ''

@@ -34,6 +34,21 @@ export interface CharacterRelationship {
   description?: string
 }
 
+/** 关联事件（角色知识库条目）：跟随人物卡、关键词触发、累积追加、可单条冻结 */
+export interface AssociatedEvent {
+  id: string
+  /** 归属角色名（默认 = 人物卡 name） */
+  roleName: string
+  /** 事件内容（一句话剧情进展） */
+  content: string
+  /** 触发关键词：对话命中才注入上下文（按需注入，不占常驻） */
+  keywords: string[]
+  /** 发生时间（ms） */
+  t: number
+  /** 单条冻结：true = 锁死，自动更新不得改写/删除 */
+  frozen?: boolean
+}
+
 /** 人物卡 */
 export interface CharacterCard {
   id: string
@@ -63,6 +78,8 @@ export interface CharacterCard {
   versionHistory: Array<{ version: number; timestamp: number; snapshot: string }>
   /** 冻结段（原文快照 + 字段归属，兼容旧 string 格式）：自动更新不得改写，按字段+原文匹配保护 */
   frozenTexts?: Array<{ field: string; text: string } | string>
+  /** 关联事件区（角色知识库）：剧情进展累积追加，绑定角色，关键词触发注入，只增不改 */
+  associatedEvents?: AssociatedEvent[]
 }
 
 /** 设定文件夹（世界书/人物卡共用，kind 区分） */
@@ -76,6 +93,8 @@ export interface ModFolder {
 export interface AutoUpdateDiff {
   wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
   cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
+  /** 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区 append，只增不改 */
+  events?: { append: Array<Record<string, unknown>> }
 }
 
 /** 自动更新事件日志 */

@@ -8,6 +8,7 @@ import { getDefaultStore } from 'jotai'
 import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
 import { applyFrozenProtection } from './frozen-text'
 import { runConfirmGate } from './confirm-gate'
+import { applyRemoveGuard, appendEvents } from './event-split'
 
 export { similarityRatio, SIMILARITY_TRIVIAL }
 
@@ -85,7 +86,8 @@ function buildUpdatePrompt(
   loadedWb: string,
   loadedCc: string,
   frozenWb: Array<{ name: string; frozen: string[] }> = [],
-  frozenCc: Array<{ name: string; frozen: string[] }> = []
+  frozenCc: Array<{ name: string; frozen: string[] }> = [],
+  loadedEvents = ''
 ): string {
   const frozenSection = (label: string, list: Array<{ name: string; frozen: string[] }>): string => {
     const rows = list
@@ -101,15 +103,18 @@ function buildUpdatePrompt(
     '输出格式（只输出 JSON，不要多余文字）：',
     '{',
     '  "worldBooks": { "add": [{"name","content","keywords"}], "update": [{"name","content","keywords"}], "remove": ["名称"] },',
-    '  "characters": { "add": [{"name","age","gender","occupation","appearance","height","weight","distinguishingFeatures","personalityType","strengths","weaknesses","hobbies","backgroundStory","relationships":[{"targetName","relation","description"}]}], "update": [同名同结构], "remove": ["名称"] }',
+    '  "characters": { "add": [{"name","age","gender","occupation","appearance","height","weight","distinguishingFeatures","personalityType","strengths","weaknesses","hobbies","backgroundStory","relationships":[{"targetName","relation","description"}]}], "update": [同名同结构], "remove": ["名称"] },',
+    '  "events": { "append": [{"roleName","content","keywords"}] }',
     '}',
     '',
     '规则：',
     '1. add（新增）：对话中出现、但当前设定库里没有的新设定/新人物。',
     '2. 新建人物卡必须输出完整字段：年龄/性别/职业/外貌/身高/体重/显著特征/性格类型/优点/缺点/爱好/背景故事/关系全部填写，拿不准的写"未知"，不许留空字符串。背景故事写完整（身世、经历、当前状态/立场）。',
     '3. update（更新）：已有条目被对话提供新信息或纠正时更新。必须输出合并后的完整内容——保留旧条目全部有效设定，只增补/修正对话中变化的部分，不得删减未被对话推翻的信息。',
-    '4. remove（删除）：只删除被对话明确推翻或废弃的条目；不确定就保留。',
-    '5. 没有变化就输出空数组。不要编造未出现的信息。',
+    '4. **背景/事件分流（重要）**：对话产生的剧情进展（事件、经历、互动）一律输出到 events.append，归属角色写 roleName（必须与人物卡名称一致），内容用一句话概括，keywords 给 1-3 个后续触发词；事件只追加不覆盖，已有事件不要重复添加。',
+    '5. **背景区保护**：characters.update 只用于人设本质变化（身份/立场/性格真变了）；一般剧情细节禁止写进 backgroundStory。',
+    '6. remove（删除）：只删除被对话明确推翻或废弃的条目；不确定就保留。含冻结段或有关联事件的条目绝不能出现在 remove。',
+    '7. 没有变化就输出空数组。不要编造未出现的信息。',
     frozenWbSec,
     frozenCcSec,
     '--- 当前世界书 ---',
@@ -118,16 +123,16 @@ function buildUpdatePrompt(
     '--- 当前人物卡 ---',
     loadedCc || '（空）',
     '',
+    '--- 已有关联事件（勿重复添加）---',
+    loadedEvents || '（空）',
+    '',
     '--- 最新剧情对话 ---',
     dialogText,
   ].join('\n')
 }
 
 /** 解析差异 JSON */
-function parseDiff(raw: string): {
-  wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
-  cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
-} | null {
+function parseDiff(raw: string): AutoUpdateDiff | null {
   const parsed = extractJsonBlock(raw)
   if (!parsed || typeof parsed !== 'object') return null
   const r = parsed as Record<string, unknown>
@@ -135,9 +140,18 @@ function parseDiff(raw: string): {
   const ccRaw = (r.characters ?? {}) as Record<string, unknown>
   const arr = (v: unknown) => (Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [])
   const names = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : [])
+  // 关联事件：模型可输出 { "events": { "append": [...] } } 或 { "events": [...] }（容错两种形态）
+  let eventsAppend: Array<Record<string, unknown>> = []
+  const evRaw = r.events
+  if (evRaw && typeof evRaw === 'object') {
+    const inner = (evRaw as Record<string, unknown>).append
+    if (Array.isArray(inner)) eventsAppend = inner as Array<Record<string, unknown>>
+    else if (Array.isArray(evRaw)) eventsAppend = evRaw as Array<Record<string, unknown>>
+  }
   return {
     wb: { add: arr(wbRaw.add), update: arr(wbRaw.update), remove: names(wbRaw.remove) },
     cc: { add: arr(ccRaw.add), update: arr(ccRaw.update), remove: names(ccRaw.remove) },
+    events: { append: eventsAppend },
   }
 }
 
@@ -154,6 +168,8 @@ export interface AutoUpdateResult {
   ccAdd: number
   ccUpdate: number
   ccRemove: number
+  /** 关联事件追加条数（剧情进展 → 角色事件区 append） */
+  eventsAdd: number
 }
 
 /** 更新预览：模型算出的差异，交给 UI 弹窗展示并让用户确认 */
@@ -171,11 +187,11 @@ export async function maybeAutoUpdateWorldBooks(
   opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null> } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
-  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0 }
+  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
   if (opts.force) updating = false
   updating = true
 
-  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0 }
+  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
   try {
     const store = getDefaultStore()
     const settings = store.get(modSettingsAtom)
@@ -195,12 +211,21 @@ export async function maybeAutoUpdateWorldBooks(
 
     const sessionSettings = await getSessionSettings(target)
     const model = await createModel(sessionSettings)
+    // 已有关联事件摘要（供模型避免重复添加；每卡最近 15 条）
+    const loadedEvents = loadedCc
+      .map((c) => {
+        const evs = (c.associatedEvents ?? []).slice(-15).map((e) => `[${new Date(e.t).toLocaleString()}] ${e.content}`)
+        return evs.length ? `- ${c.name}：\n${evs.map((x) => `  · ${x}`).join('\n')}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
     const prompt = buildUpdatePrompt(
       dialogText,
       loadedWb.map((w) => `- ${w.name}: ${String(w.content ?? '').slice(0, 4000)}`).join('\n'),
       loadedCc.map((c) => `- ${c.name}: ${String(c.backgroundStory ?? '').slice(0, 6000)}`).join('\n'),
       loadedWb.map((w) => ({ name: w.name, frozen: (w.frozenTexts ?? []).map((x) => (typeof x === 'string' ? x : x.text)) })),
-      loadedCc.map((c) => ({ name: c.name, frozen: (c.frozenTexts ?? []).map((x) => (typeof x === 'string' ? x : x.text)) }))
+      loadedCc.map((c) => ({ name: c.name, frozen: (c.frozenTexts ?? []).map((x) => (typeof x === 'string' ? x : x.text)) })),
+      loadedEvents
     )
     const modelResult = await model.chat(
       [
@@ -213,6 +238,21 @@ export async function maybeAutoUpdateWorldBooks(
     if (!diff) {
       throw new Error('模型输出无法解析为 JSON 差异')
     }
+
+    // 按名称索引（remove 保护与增改应用共用）
+    const wbByName = new Map(allWb.map((w) => [w.name, w]))
+    const ccByName = new Map(allCc.map((c) => [c.name, c]))
+
+    // remove 保护（预览前过滤，方案书 B/C）：含冻结段或有关联事件的条目禁止删除，
+    // 被保护的删除不展示、不执行（用户勾选也无效 → 直接不出现）
+    diff = applyRemoveGuard(
+      diff,
+      (name) => (wbByName.get(name)?.frozenTexts?.length ?? 0) > 0,
+      (name) => {
+        const c = ccByName.get(name)
+        return (c?.frozenTexts?.length ?? 0) > 0 || (c?.associatedEvents?.length ?? 0) > 0
+      }
+    )
 
     // 人工确认（可配置）：优先展示「更新预览」供用户逐条勾选（返回勾选后的差异）
     // 确认门保证：要求确认时，弹窗缺失/异常 → 中止，绝不静默写回
@@ -249,7 +289,6 @@ export async function maybeAutoUpdateWorldBooks(
     }
 
     // 世界书：新增/更新（按名称匹配）
-    const wbByName = new Map(allWb.map((w) => [w.name, w]))
     for (const item of diff.wb.add) {
       const name = str(item.name)
       if (!name) continue
@@ -294,7 +333,6 @@ export async function maybeAutoUpdateWorldBooks(
     }
 
     // 人物卡：新增/更新（按名称匹配）
-    const ccByName = new Map(allCc.map((c) => [c.name, c]))
     for (const item of diff.cc.add) {
       const name = str(item.name)
       if (!name) continue
@@ -352,6 +390,17 @@ export async function maybeAutoUpdateWorldBooks(
       await removeCharacterCard(existing.id)
       binding.characterCardIds = binding.characterCardIds.filter((id) => id !== existing.id)
       result.ccRemove++
+    }
+
+    // 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区末尾，累积不覆盖
+    const eventsAppend = diff.events?.append ?? []
+    for (const item of eventsAppend) {
+      const roleName = str(item.roleName) || str(item.name)
+      if (!roleName) continue
+      const card = ccByName.get(roleName)
+      if (!card) continue // 归属角色卡不存在 → 跳过（不散落无关数据）
+      await addOrUpdateCharacterCard(appendEvents(card, [item]))
+      result.eventsAdd++
     }
 
     // 装载变化写回会话

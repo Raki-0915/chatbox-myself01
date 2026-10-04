@@ -13,6 +13,7 @@ import {
   Card,
   Checkbox,
   Divider,
+  Flex,
   Group,
   Grid,
   Modal,
@@ -1282,6 +1283,12 @@ function MergeCardsModal(props: {
 function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard; onChange: (c: CharacterCard) => void; folders: ModFolder[] }) {
   const set = (patch: Partial<CharacterCard>) => onChange({ ...card, ...patch })
   const [freeze, setFreeze] = useState(false)
+  // 关联事件区：展示/添加/单条冻结
+  const events = card.associatedEvents ?? []
+  const setEvents = (list: CharacterCard['associatedEvents']) => set({ associatedEvents: list })
+  const [addingEvent, setAddingEvent] = useState(false)
+  const [newEventContent, setNewEventContent] = useState('')
+  const [newEventKws, setNewEventKws] = useState('')
   const fields = [
     { field: 'appearance', label: '外貌', content: card.appearance },
     { field: 'distinguishingFeatures', label: '显著特征', content: card.distinguishingFeatures },
@@ -1359,6 +1366,51 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         </Group>
       ))}
       <Button size="compact-xs" variant="subtle" onClick={() => set({ customAttributes: [...card.customAttributes, { key: '', value: '' }] })}>+ 添加属性</Button>
+      {/* 关联事件区（角色知识库：剧情进展累积、关键词触发注入、可单条冻结） */}
+      <Divider label={`关联事件区（${events.length} 条 · 只增不改 · 关键词触发注入）`} labelPosition="left" />
+      {events.length === 0 ? (
+        <Text c="dimmed" size="xs">暂无关联事件。剧情进展由自动更新追加到这里（累积大事记，不会被覆盖）。</Text>
+      ) : (
+        <Stack gap={4}>
+          {events.slice().reverse().map((e) => (
+            <Box key={e.id} style={{ border: e.frozen ? '1px solid #f0c0c0' : '1px solid #e0e0e0', borderRadius: 4, padding: '4px 6px', background: e.frozen ? '#fff4f2' : '#fff' }}>
+              <Flex justify="space-between" align="center" gap="xs">
+                <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{e.roleName}</Text>
+                <Text size="xs" c="dimmed">{new Date(e.t).toLocaleString()}</Text>
+                <ActionIcon size="xs" color={e.frozen ? 'red' : 'gray'} variant="subtle" title={e.frozen ? '已冻结（AI 不改）' : '未冻结'} onClick={() => setEvents(events.map((x) => (x.id === e.id ? { ...x, frozen: !x.frozen } : x)))}>{e.frozen ? '🔒' : '🔓'}</ActionIcon>
+                <ActionIcon size="xs" color="red" variant="subtle" onClick={() => setEvents(events.filter((x) => x.id !== e.id))}>✕</ActionIcon>
+              </Flex>
+              <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>{e.content}</Text>
+              {e.keywords && e.keywords.length > 0 ? <Text size="xs" c="blue">触发词: {e.keywords.join(' / ')}</Text> : null}
+            </Box>
+          ))}
+        </Stack>
+      )}
+      {addingEvent ? (
+        <>
+          <Textarea size="xs" autosize minRows={2} placeholder="事件内容（一句话剧情进展）" value={newEventContent} onChange={(ev) => setNewEventContent(ev.currentTarget.value)} />
+          <TextInput size="xs" placeholder="触发关键词（逗号分隔，对话命中才注入上下文）" value={newEventKws} onChange={(ev) => setNewEventKws(ev.currentTarget.value)} />
+          <Group>
+            <Button size="compact-xs" color="chatbox-brand" onClick={() => {
+              const content = newEventContent.trim()
+              if (!content) return
+              setEvents([...events, {
+                id: uuidv4(),
+                roleName: card.name,
+                content,
+                keywords: newEventKws.split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 8),
+                t: Date.now(),
+              }])
+              setNewEventContent('')
+              setNewEventKws('')
+              setAddingEvent(false)
+            }}>添加</Button>
+            <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(false)}>取消</Button>
+          </Group>
+        </>
+      ) : (
+        <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(true)}>+ 手动添加事件</Button>
+      )}
       {/* 归属 */}
       <Divider label="归属" labelPosition="left" />
       <Select

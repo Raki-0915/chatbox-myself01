@@ -393,6 +393,9 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     wb: newSelFiltered(diff.wb.add.length, diff.wb.update.length, diff.wb.remove, trivialWb),
     cc: newSelFiltered(diff.cc.add.length, diff.cc.update.length, diff.cc.remove, trivialCc),
   }))
+  // 关联事件追加：默认全选（只增不改，低风险），可取消
+  const events = diff.events?.append ?? []
+  const [selEvents, setSelEvents] = useState<Set<number>>(() => new Set(events.map((_, i) => i)))
   // 编辑态：editingKey = `${group}:${name}`；editedMap 存「本次要应用的新内容」
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editedMap, setEditedMap] = useState<Record<string, string>>({})
@@ -415,9 +418,9 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
   const changeEdit = (key: string, v: string) => setEditedMap((m) => ({ ...m, [key]: v }))
 
   const total = diff.wb.add.length + diff.wb.update.length + diff.wb.remove.length +
-    diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length
+    diff.cc.add.length + diff.cc.update.length + diff.cc.remove.length + events.length
   const selTotal = sel.wb.add.size + sel.wb.update.size + sel.wb.remove.size +
-    sel.cc.add.size + sel.cc.update.size + sel.cc.remove.size
+    sel.cc.add.size + sel.cc.update.size + sel.cc.remove.size + selEvents.size
   const allSelected = selTotal === total
 
   const toggle = (group: 'wb' | 'cc', kind: 'add' | 'update', idx: number) => {
@@ -436,14 +439,24 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
       return { ...s, [group]: { ...s[group], remove: next } }
     })
   }
+  const toggleEvent = (idx: number) => {
+    setSelEvents((s) => {
+      const next = new Set(s)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
   const toggleAll = () => {
     if (allSelected) {
       setSel({ wb: { add: new Set(), update: new Set(), remove: new Set() }, cc: { add: new Set(), update: new Set(), remove: new Set() } })
+      setSelEvents(new Set())
     } else {
       setSel({
         wb: newSel(diff.wb.add.length, diff.wb.update.length, diff.wb.remove),
         cc: newSel(diff.cc.add.length, diff.cc.update.length, diff.cc.remove),
       })
+      setSelEvents(new Set(events.map((_, i) => i)))
     }
   }
 
@@ -470,6 +483,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
         update: override('cc', pick(diff.cc.update, sel.cc.update), 'backgroundStory'),
         remove: diff.cc.remove.filter((n) => sel.cc.remove.has(n)),
       },
+      events: { append: pick(events, selEvents) },
     }
     modal.resolve(result)
     modal.remove()
@@ -522,6 +536,21 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
                 onEnterEdit={enterEdit} onDoneEdit={doneEdit} onCancelEdit={cancelEdit} onEditChange={changeEdit}
               />
               <PickRemoveList title="删除" names={diff.cc.remove} selected={sel.cc.remove} onToggle={(n) => toggleRemove('cc', n)} summaryOf={(n) => String(oldLookup.ccOf(n)?.backgroundStory ?? '')} />
+              {events.length > 0 && (
+                <>
+                  <Divider label="关联事件（追加到角色事件区，只增不改）" labelPosition="left" />
+                  {events.map((e, i) => (
+                    <Box key={i} style={{ border: selEvents.has(i) ? '1.5px solid #2563eb' : '1px solid #e0e0e0', borderRadius: 6, padding: '4px 8px', background: selEvents.has(i) ? '#eff6ff' : '#fafafa', cursor: 'pointer' }} onClick={() => toggleEvent(i)}>
+                      <Flex align="center" gap={4}>
+                        <Checkbox size="xs" checked={selEvents.has(i)} onChange={() => toggleEvent(i)} style={{ pointerEvents: 'none' }} />
+                        <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{String(e.roleName ?? e.name ?? '（未命名）')}</Text>
+                      </Flex>
+                      <Text size="xs" style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{String(e.content ?? '')}</Text>
+                      {Array.isArray(e.keywords) && e.keywords.length > 0 ? <Text size="xs" c="blue">触发词: {e.keywords.join(' / ')}</Text> : null}
+                    </Box>
+                  ))}
+                </>
+              )}
             </Stack>
           </Box>
           <Group justify="space-between" gap="sm">
