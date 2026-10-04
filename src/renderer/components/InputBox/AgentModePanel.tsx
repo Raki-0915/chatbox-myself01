@@ -1228,9 +1228,7 @@ const AgentModePanel = forwardRef<AgentModePanelHandle, AgentModePanelProps>(fun
                   </Button>
                 </Flex>
                 <Text size="xs" c="chatbox-secondary" className="leading-snug max-w-[244px]">
-                  {modChatMode === 'group'
-                    ? '聊天模式：群聊 · 深色主题（工作模式仍仅桌面端可用）'
-                    : '创作模式：世界书/人物卡、自动更新、小说续写（工作模式仍仅桌面端可用）'}
+                  {modChatMode === 'group' ? '聊天模式' : '创作模式'}
                 </Text>
               </>
             )}
