@@ -1289,6 +1289,20 @@ function AutoUpdateTab() {
   // 分析消息数：是否处于快捷档位 / 是否点了「自定义」
   const isPresetRc = ['8', '16', '30', '60'].includes(String(settings.recentMessages))
   const [showCustomRc, setShowCustomRc] = useState(false)
+  // 自定义输入草稿（本地编辑，失焦/回车才校验写回，允许自由删改）
+  const [rcDraft, setRcDraft] = useState<string>(String(settings.recentMessages))
+  useEffect(() => {
+    setRcDraft(String(settings.recentMessages))
+  }, [settings.recentMessages])
+  const commitRc = () => {
+    const n = Math.min(100, Math.max(4, Number(rcDraft)))
+    if (!Number.isFinite(n) || n < 4 || n > 100) {
+      setRcDraft(String(settings.recentMessages))
+      return
+    }
+    setRcDraft(String(n))
+    void updateModSettings({ recentMessages: n })
+  }
 
   const runNow = async () => {
     if (!sessionId || sessionId === 'new') {
@@ -1349,11 +1363,14 @@ function AutoUpdateTab() {
           <NumberInput
             mt={6}
             size="xs"
-            label="自定义分析消息数"
-            value={settings.recentMessages}
+            label="自定义分析消息数（4~100，删除或回车确认）"
+            value={rcDraft}
             min={4}
             max={100}
-            onChange={(v) => void updateModSettings({ recentMessages: Number(v) || 16 })}
+            allowDecimal={false}
+            onChange={(v) => setRcDraft(v === null || v === undefined ? '' : String(v))}
+            onBlur={commitRc}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRc() } }}
           />
         ) : null}
       </Box>
