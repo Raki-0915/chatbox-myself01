@@ -231,11 +231,16 @@ export function parseChatImport(content: string, filename: string): ChatImportRe
   return { ok: false, messages: [], format: 'Unknown', error: '无法识别的聊天记录格式' }
 }
 
-/** 将导入消息转为官方 Message 对象数组（去掉 system 以符合会话结构） */
+/** 将导入消息转为官方 Message 对象数组（系统提示词保留并置于最前） */
 export function toSessionMessages(imported: ImportedMessage[]) {
-  return imported
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => createMessage(m.role === 'user' ? MessageRoleEnum.User : MessageRoleEnum.Assistant, m.content))
+  // 系统提示词（role='system'）必须保留并置于最前——Chatbox 约定会话的系统提示词
+  // 是消息列表第一条 system 消息；丢掉它 = 导入后系统提示词丢失。
+  const system = imported.filter((m) => m.role === 'system')
+  const rest = imported.filter((m) => m.role === 'user' || m.role === 'assistant')
+  return [
+    ...system.map((m) => createMessage(MessageRoleEnum.System, m.content)),
+    ...rest.map((m) => createMessage(m.role === 'user' ? MessageRoleEnum.User : MessageRoleEnum.Assistant, m.content)),
+  ]
 }
 
 /** 生成导入会话 ID */
