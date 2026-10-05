@@ -1414,6 +1414,23 @@ const _Message: FC<Props> = (props) => {
               isSmallScreen ? (shouldShowAvatar ? 'max-w-[calc(100%-3rem)]' : 'max-w-[95%]') : 'max-w-[85%]'
             )}
           >
+            {/* Chatbox Mod：群聊用户扮演角色 → 气泡上方显示角色名 + 角色头像 */}
+            {msg.name && msg.name !== '系统' && (
+              <Flex align="center" gap={4} className="mb-0.5 select-none" justify="flex-end">
+                {groupRoleAvatar && (
+                  <Box
+                    component="img"
+                    src={groupRoleAvatar}
+                    alt=""
+                    className="h-4 w-4 rounded-full object-cover"
+                    draggable={false}
+                  />
+                )}
+                <Text size="xs" fw={600} c="chatbox-brand">
+                  {msg.name}
+                </Text>
+              </Flex>
+            )}
             {messageContent}
             {(msg.files || msg.links) && <MessageAttachmentGrid files={msg.files} links={msg.links} align="end" />}
             {meta}

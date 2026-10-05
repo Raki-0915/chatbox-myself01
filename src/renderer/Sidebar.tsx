@@ -163,7 +163,8 @@ export default function Sidebar() {
       PaperProps={
         language === 'ar' ? { sx: { direction: 'rtl', overflowY: 'initial' } } : { sx: { overflowY: 'initial' } }
       }
-      disableSwipeToOpen={CHATBOX_BUILD_PLATFORM !== 'ios'} // 只在iOS设备上启用SwipeToOpen
+      // Chatbox Mod：所有平台均启用边缘右滑拉出（原实现仅 iOS 启用）
+      disableSwipeToOpen={false}
     >
       <Stack
         data-testid={TestId.sidebar.root}

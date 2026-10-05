@@ -3,7 +3,7 @@ import { getSubmitAvailability } from '@chatbox/core/session/action-gates'
 import { isActionAvailableInMode, resolveSessionMode } from '@chatbox/core/session/mode-policy'
 import NiceModal from '@ebay/nice-modal-react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
-import { ActionIcon, Box, Button, Flex, Loader, Menu, Stack, Text, Textarea, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Avatar, Box, Button, Flex, Group, Loader, Menu, SimpleGrid, Stack, Text, Textarea, UnstyledButton } from '@mantine/core'
 import { useViewportSize } from '@mantine/hooks'
 import { TestId } from '@shared/automation/testids'
 import {
@@ -54,6 +54,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useStore } from 'zustand'
 import { JK_PAGE_NAMES } from '@/analytics/jk-events'
 import { modSettingsAtom } from '@/modules/store'
+import { characterCardsAtom } from '@/modules/store'
 import { scheduleGroupAutoPlay } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -268,9 +269,19 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     const messageInputFieldRef = useRef<MessageInputFieldRef>(null)
     const latestInputRef = useRef('')
     const [hasTextContent, setHasTextContent] = useState(false)
-    // Chatbox Mod：群聊发言身份（默认角色；切「系统事件」后发送的消息标记 name='系统'）
-    const [groupIdentity, setGroupIdentity] = useState<'role' | 'system'>('role')
+    // Chatbox Mod：群聊发言身份（普通角色 / 扮演某角色 / 系统事件）
+    const [groupIdentity, setGroupIdentity] = useState<{ kind: 'role' | 'system' | 'char'; charName?: string }>({
+      kind: 'role',
+    })
+    const [groupPickerOpen, setGroupPickerOpen] = useState(false)
     const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
+    const groupRoleCards = useAtomValue(characterCardsAtom)
+    const groupIdentityLabel =
+      groupIdentity.kind === 'char'
+        ? `扮演：${groupIdentity.charName ?? ''}`
+        : groupIdentity.kind === 'system'
+          ? '系统事件'
+          : '角色'
     const draftMessageIdRef = useRef<string | undefined>(undefined)
     const enabledSkillNames = useSettingsStore((state) => state.skills.enabledSkillNames)
     const [inputSkills, setInputSkills] = useState<Array<{ name: string; description: string }>>([])
@@ -385,6 +396,11 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
 
     const { session: currentSession } = useSession(sessionId || null)
     const { sessionSettings: currentSessionMergedSettings } = useSessionSettings(sessionId || null)
+    // Chatbox Mod：在场角色 = 当前会话装载的人物卡（enabled）
+    const presentRoleCards = useMemo(() => {
+      const ids = currentSession?.settings?.characterCardIds ?? []
+      return groupRoleCards.filter((c) => c.enabled !== false && ids.includes(c.id))
+    }, [groupRoleCards, currentSession])
     const sessionLocks = useSessionLockState(currentSession)
     const submitAvailability = getSubmitAvailability(sessionLocks)
     // While replies stream, an empty draft shows Stop; entering content turns
@@ -508,7 +524,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
         pictureKeys,
         preConstructedMessage.preprocessedFiles,
         [],
-        groupIdentity === 'system' ? '系统' : undefined
+        groupIdentity.kind === 'system' ? '系统' : groupIdentity.kind === 'char' ? groupIdentity.charName : undefined
       )
       setPreConstructedMessage((prev) => ({
         ...prev,
@@ -958,7 +974,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
           pictureKeys,
           preprocessedFilesForSubmit,
           [],
-          groupIdentity === 'system' ? '系统' : undefined
+          groupIdentity.kind === 'system' ? '系统' : groupIdentity.kind === 'char' ? groupIdentity.charName : undefined
         )
         if (!latestMessage) {
           console.error('No constructed message available')
@@ -1674,18 +1690,27 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 onPaste={onPaste}
               />
 
-              {/* Mod：群聊发言身份切换（仅聊天/群聊模式显示） */}
+              {/* Mod：群聊发言身份选择（仅聊天/群聊模式显示） */}
               {modChatMode === 'group' && (
-                <Tooltip label={groupIdentity === 'system' ? '当前：系统事件（剧情旁白，所有角色响应）' : '当前：角色（普通发言）'} withArrow>
+                <Tooltip
+                  label={
+                    groupIdentity.kind === 'system'
+                      ? '当前：系统事件（剧情旁白，所有角色响应）'
+                      : groupIdentity.kind === 'char'
+                        ? `当前：扮演 ${groupIdentity.charName}`
+                        : '当前：角色（普通发言）'
+                  }
+                  withArrow
+                >
                   <Button
                     size="compact-xs"
-                    variant={groupIdentity === 'system' ? 'filled' : 'subtle'}
-                    color={groupIdentity === 'system' ? 'orange' : 'gray'}
+                    variant={groupIdentity.kind !== 'role' ? 'filled' : 'subtle'}
+                    color={groupIdentity.kind === 'system' ? 'orange' : groupIdentity.kind === 'char' ? 'chatbox-brand' : 'gray'}
                     className="shrink-0 mb-1"
                     radius="lg"
-                    onClick={() => setGroupIdentity((v) => (v === 'role' ? 'system' : 'role'))}
+                    onClick={() => setGroupPickerOpen(true)}
                   >
-                    {groupIdentity === 'role' ? '角色' : '系统事件'}
+                    {groupIdentityLabel}
                   </Button>
                 </Tooltip>
               )}
@@ -2221,6 +2246,66 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
             session={currentSession}
           />
         )}
+        {/* Chatbox Mod：群聊发言身份选择面板 */}
+        <AdaptiveModal opened={groupPickerOpen} onClose={() => setGroupPickerOpen(false)} title="以谁的身份发言" size="sm">
+          <Stack gap="sm">
+            {presentRoleCards.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                当前会话未装载角色，先到创作设置勾选在场角色，再回来选择。
+              </Text>
+            ) : (
+              <SimpleGrid cols={3} spacing="sm">
+                {presentRoleCards.map((c) => (
+                  <UnstyledButton
+                    key={c.id}
+                    onClick={() => {
+                      setGroupIdentity({ kind: 'char', charName: c.name })
+                      setGroupPickerOpen(false)
+                    }}
+                    className="rounded-lg p-1 hover:bg-chatbox-background-secondary transition-colors"
+                  >
+                    <Stack gap={4} align="center">
+                      {c.avatar ? (
+                        <Avatar src={c.avatar} size={46} radius="xl" />
+                      ) : (
+                        <Avatar color="chatbox-brand" size={46} radius="xl">
+                          {(c.name ?? '?').slice(0, 1)}
+                        </Avatar>
+                      )}
+                      <Text size="xs" fw={600} ta="center" lineClamp={1}>
+                        {c.name}
+                      </Text>
+                    </Stack>
+                  </UnstyledButton>
+                ))}
+              </SimpleGrid>
+            )}
+            <Group justify="space-between" gap="sm" grow>
+              <Button
+                size="xs"
+                variant={groupIdentity.kind === 'role' ? 'filled' : 'default'}
+                color={groupIdentity.kind === 'role' ? 'chatbox-brand' : undefined}
+                onClick={() => {
+                  setGroupIdentity({ kind: 'role' })
+                  setGroupPickerOpen(false)
+                }}
+              >
+                普通发言
+              </Button>
+              <Button
+                size="xs"
+                variant={groupIdentity.kind === 'system' ? 'filled' : 'default'}
+                color={groupIdentity.kind === 'system' ? 'orange' : undefined}
+                onClick={() => {
+                  setGroupIdentity({ kind: 'system' })
+                  setGroupPickerOpen(false)
+                }}
+              >
+                系统事件
+              </Button>
+            </Group>
+          </Stack>
+        </AdaptiveModal>
         <AdaptiveModal
           opened={unreadyAttachmentSubmitPrompt.opened}
           onClose={() => setUnreadyAttachmentSubmitPrompt((prev) => ({ ...prev, opened: false }))}
