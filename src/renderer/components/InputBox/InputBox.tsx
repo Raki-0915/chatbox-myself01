@@ -53,6 +53,8 @@ import { useTranslation } from 'react-i18next'
 import { v4 as uuidv4 } from 'uuid'
 import { useStore } from 'zustand'
 import { JK_PAGE_NAMES } from '@/analytics/jk-events'
+import { modSettingsAtom } from '@/modules/store'
+import { scheduleGroupAutoPlay } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { AppTooltip as Tooltip } from '@/components/ui/tooltip'
@@ -266,6 +268,9 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     const messageInputFieldRef = useRef<MessageInputFieldRef>(null)
     const latestInputRef = useRef('')
     const [hasTextContent, setHasTextContent] = useState(false)
+    // Chatbox Mod：群聊发言身份（默认角色；切「系统事件」后发送的消息标记 name='系统'）
+    const [groupIdentity, setGroupIdentity] = useState<'role' | 'system'>('role')
+    const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
     const draftMessageIdRef = useRef<string | undefined>(undefined)
     const enabledSkillNames = useSettingsStore((state) => state.skills.enabledSkillNames)
     const [inputSkills, setInputSkills] = useState<Array<{ name: string; description: string }>>([])
@@ -502,7 +507,8 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
         text,
         pictureKeys,
         preConstructedMessage.preprocessedFiles,
-        []
+        [],
+        groupIdentity === 'system' ? '系统' : undefined
       )
       setPreConstructedMessage((prev) => ({
         ...prev,
@@ -951,7 +957,8 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
           latestInputRef.current,
           pictureKeys,
           preprocessedFilesForSubmit,
-          []
+          [],
+          groupIdentity === 'system' ? '系统' : undefined
         )
         if (!latestMessage) {
           console.error('No constructed message available')
@@ -1032,6 +1039,11 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
         await waitForReasoningPersist()
 
         await onSubmit?.(params)
+
+        // Chatbox Mod：群聊模式发送成功后调度自动演（AI 连续演 N 轮）
+        if (modChatMode === 'group' && needGenerating) {
+          scheduleGroupAutoPlay(currentSessionId)
+        }
 
         trackingEvent('send_message', { event_category: 'user' })
       } catch (e) {
@@ -1661,6 +1673,22 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
               />
+
+              {/* Mod：群聊发言身份切换（仅聊天/群聊模式显示） */}
+              {modChatMode === 'group' && (
+                <Tooltip label={groupIdentity === 'system' ? '当前：系统事件（剧情旁白，所有角色响应）' : '当前：角色（普通发言）'} withArrow>
+                  <Button
+                    size="compact-xs"
+                    variant={groupIdentity === 'system' ? 'filled' : 'subtle'}
+                    color={groupIdentity === 'system' ? 'orange' : 'gray'}
+                    className="shrink-0 mb-1"
+                    radius="lg"
+                    onClick={() => setGroupIdentity((v) => (v === 'role' ? 'system' : 'role'))}
+                  >
+                    {groupIdentity === 'role' ? '角色' : '系统事件'}
+                  </Button>
+                </Tooltip>
+              )}
 
               {/* Mod：全屏输入入口 */}
               <Tooltip label={t('Fullscreen input') || '全屏输入'} withArrow>

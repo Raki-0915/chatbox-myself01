@@ -64,6 +64,38 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
     const allCc = store.get(characterCardsAtom)
     const wb = getEnabledByIds(allWb, worldBookIds ?? [])
     const cc = getEnabledByIds(allCc, characterCardIds ?? [])
+    const groupMode = settings.chatMode === 'group'
+    if (groupMode) {
+      // 群聊模板：在场角色名单（紧凑人设）+ 群聊规则（轮流发言 / 系统事件优先）
+      const roster = cc
+        .map((c) => {
+          const bits = [`【${c.name}】`]
+          if (c.personalityType) bits.push(`性格:${c.personalityType}`)
+          if (c.occupation) bits.push(`职业:${c.occupation}`)
+          if (c.backgroundStory) bits.push(`背景:${c.backgroundStory.slice(0, 200)}`)
+          return bits.join(' | ')
+        })
+        .join('\n')
+      const groupRules = [
+        '## 群聊规则',
+        '- 以下是在场角色（名单按优先级排序），你是这场群像剧的导演/旁白系统：',
+        roster || '（当前无角色名单）',
+        '- 每次回复以「在场角色轮流发言」的形式输出，格式为「角色名：台词」，一个角色一行；动作/描写可写在括号里。',
+        '- 用户消息若标记为「系统事件」（消息名称为"系统"），表示剧情事件/环境变化，所有在场角色必须围绕该事件回应，不得忽略。',
+        '- 用户未点名角色时，由与话题最相关的角色先开口，其他角色自然接话，一次回复覆盖在场角色。',
+        '- 世界书设定依然有效；与角色人设冲突时以角色人设为准。',
+      ].join('\n')
+      const wbBudget = adaptiveInjectionBudget(settings.wbInjectionLimit, dialogText.length)
+      const residentLimit = Math.min(Math.floor(wbBudget * 0.6), settings.wbInjectionLimit)
+      const { resident, scene } = splitWorldBookSections(wb, dialogText, settings.wbInjectionLimit)
+      const res = resident.slice(0, residentLimit)
+      const sc = scene.slice(0, Math.max(0, wbBudget - res.length))
+      const wbParts: string[] = []
+      if (res) wbParts.push(`## World Book · 常驻设定\n${res}`)
+      if (sc) wbParts.push(`## World Book · 场景触发\n${sc}`)
+      const parts = [groupRules, wbParts.join('\n\n')].filter(Boolean)
+      return parts.length ? parts.join('\n\n') : ''
+    }
     // 注入体积自适应：对话越长预算越小（常驻优先，场景占剩余）
     const ccBudget = adaptiveInjectionBudget(settings.ccInjectionLimit, dialogText.length)
     // 背景区（人设稳定内容）与关联事件区（关键词触发，仅命中时出现）分预算

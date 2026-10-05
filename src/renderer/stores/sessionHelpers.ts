@@ -873,10 +873,15 @@ export function constructUserMessage(
     tokenCountMap?: Record<string, number>
     lineCount?: number
     byteLength?: number
-  }> = []
+  }> = [],
+  /** Chatbox Mod：发言身份名（群聊「系统事件」时为 '系统'，普通消息不传） */
+  name?: string
 ): Message {
   // 只使用原始文本，不添加文件和链接内容
   const msg = createMessage('user', text)
+  if (name) {
+    msg.name = name
+  }
   if (messageId) {
     msg.id = messageId
   }

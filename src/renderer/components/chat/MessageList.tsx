@@ -25,7 +25,7 @@ import {
   IconSwitch3,
   IconTrash,
 } from '@tabler/icons-react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
 import {
   type FC,
   forwardRef,
@@ -54,6 +54,9 @@ import { getAllMessageList, getCurrentThreadHistoryHash } from '@/stores/session
 // Mod：对话存档分支点
 import { sessionBookmarks } from '@/modules/branches'
 import { bookmarksAtom, bookmarkJumpRequestAtom, setBookmarkJumpRequest, toggleSessionBookmark } from '@/modules/store'
+import { groupAutoPlayAtom, cancelGroupAutoPlay, GROUP_AUTOPLAY_DELAY_MS } from '@/modules/group-autoplay'
+import { modSettingsAtom } from '@/modules/store'
+import { generateMore } from '@/stores/session/generation'
 import { getMessageText } from '@shared/utils/message'
 import { settingsStore, useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
@@ -495,6 +498,44 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
   useEffect(() => {
     setMessageListElement(messageListRef)
   }, [])
+
+  // Chatbox Mod：群聊自动演 —— 用户发一条后 AI 自动连续演 N 轮（generateMore 续演）
+  const groupAutoPlay = useAtomValue(groupAutoPlayAtom)
+  const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
+  useEffect(() => {
+    if (modChatMode !== 'group') {
+      return
+    }
+    const { sessionId, remain, lastTriggeredMsgId } = groupAutoPlay
+    if (remain <= 0 || sessionId !== currentSession.id) {
+      return
+    }
+    const msgs = currentSession.messages
+    const last = msgs[msgs.length - 1]
+    if (!last || last.role !== 'assistant' || last.generating) {
+      return
+    }
+    if (last.id === lastTriggeredMsgId) {
+      return
+    }
+    if (!getMessageText(last).trim()) {
+      return
+    }
+    // 用户手动停止（官方打 finishReason='canceled'）→ 取消自动演
+    if (last.finishReason === 'canceled') {
+      cancelGroupAutoPlay()
+      return
+    }
+    const timer = setTimeout(() => {
+      void generateMore(currentSession.id, last.id)
+      getDefaultStore().set(groupAutoPlayAtom, {
+        sessionId,
+        remain: remain - 1,
+        lastTriggeredMsgId: last.id,
+      })
+    }, GROUP_AUTOPLAY_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [groupAutoPlay, modChatMode, currentSession])
 
   useEffect(() => {
     return () => smoothFollowOutput.dispose()

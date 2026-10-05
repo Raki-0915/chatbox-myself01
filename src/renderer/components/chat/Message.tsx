@@ -45,12 +45,14 @@ import {
 } from '@tabler/icons-react'
 import clsx from 'clsx'
 import * as dateFns from 'date-fns'
+import { useAtomValue } from 'jotai'
 import type React from 'react'
 import { type FC, forwardRef, type MouseEventHandler, memo, useCallback, useMemo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { trackAgentModeSuggestionAction } from '@/analytics/agent-mode'
 import { trackJkClickEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
+import { characterCardsAtom } from '@/modules/store'
 import { rendererApplication } from '@/app/renderer-application'
 import Markdown from '@/components/Markdown'
 import StreamingTextFade from '@/components/StreamingTextFade'
@@ -233,6 +235,13 @@ const _Message: FC<Props> = (props) => {
   const contentLength = useMemo(() => {
     return getMessageText(msg).length
   }, [msg])
+
+  // Chatbox Mod：群聊角色头像（消息 name 命中人物卡时取卡头像）
+  const groupAllCards = useAtomValue(characterCardsAtom)
+  const groupRoleAvatar = useMemo(() => {
+    if (!msg.name || msg.name === '系统') return undefined
+    return groupAllCards.find((c) => c.name === msg.name)?.avatar
+  }, [msg.name, groupAllCards])
 
   const needCollapse =
     collapseThreshold &&
@@ -1333,6 +1342,34 @@ const _Message: FC<Props> = (props) => {
     return <BackgroundTaskNotificationUI task={msg.backgroundTask} className={className} />
   }
 
+  // Chatbox Mod：群聊「系统事件」旁白 —— 居中斜体，无气泡无头像
+  if (isBubbleLayout && msg.role === 'user' && msg.name === '系统') {
+    return (
+      <Box
+        data-testid={TestId.message.item}
+        data-message-role={msg.role}
+        ref={ref}
+        id={props.id}
+        key={msg.id}
+        onContextMenu={handleMessageContextMenu}
+        onClick={handleMessageClick}
+        className={cn('group/message', 'msg-block', 'bubble-msg', 'px-2 py-1.5', 'w-full', selectionMode && 'cursor-pointer')}
+        sx={{ paddingBottom: '0.1rem', paddingX: '1rem' }}
+      >
+        <Flex justify="center" className="w-full min-w-0">
+          <Text
+            size="sm"
+            fs="italic"
+            c="chatbox-secondary"
+            className="max-w-[92%] text-center whitespace-pre-wrap break-words leading-relaxed"
+          >
+            {getMessageText(msg)}
+          </Text>
+        </Flex>
+      </Box>
+    )
+  }
+
   if (isBubbleLayout && msg.role === 'user') {
     return (
       <Box
@@ -1449,6 +1486,23 @@ const _Message: FC<Props> = (props) => {
             </Box>
           )}
           <Flex direction="column" align="flex-start" className="min-w-0 flex-1 max-w-full">
+            {/* Chatbox Mod：群聊角色名 + 角色头像 */}
+            {isBubbleLayout && msg.role === 'assistant' && msg.name && msg.name !== '系统' && (
+              <Flex align="center" gap={4} className="mb-0.5 select-none">
+                {groupRoleAvatar && (
+                  <Box
+                    component="img"
+                    src={groupRoleAvatar}
+                    alt=""
+                    className="h-4 w-4 rounded-full object-cover"
+                    draggable={false}
+                  />
+                )}
+                <Text size="xs" fw={600} c="chatbox-brand">
+                  {msg.name}
+                </Text>
+              </Flex>
+            )}
             {messageContent}
             {(msg.files || msg.links) && <MessageAttachmentGrid files={msg.files} links={msg.links} align="start" />}
             {meta}
