@@ -37,10 +37,11 @@ function SheetSection(props: {
   disabledEntries: SheetEntry[]
   selected: string[]
   onToggle: (id: string) => void
+  onSelectAll: () => void
   onGoEnable: () => void
   accent: string
 }) {
-  const { icon, title, folders, enabledEntries, disabledEntries, selected, onToggle, onGoEnable, accent } = props
+  const { icon, title, folders, enabledEntries, disabledEntries, selected, onToggle, onSelectAll, onGoEnable, accent } = props
   // 当前文件夹筛选：'all' 全部 / 'none' 未分类 / 文件夹 id
   const [folder, setFolder] = useState<string>('all')
 
@@ -66,6 +67,9 @@ function SheetSection(props: {
         <Text size="xs" c="dimmed">
           已装载 {selected.length}/{enabledEntries.length + disabledEntries.length}
         </Text>
+        <Button size="compact-xs" variant="light" color="green" style={{ marginLeft: 'auto' }} onClick={onSelectAll}>
+          全选
+        </Button>
       </Group>
       {/* 文件夹切换（模仿创作资料：全部 / 未分类 / 各文件夹；无文件夹时也显示 全部/未分类） */}
       <Group gap={6} wrap="wrap" mb={6}>
@@ -192,6 +196,9 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
     setWbSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const toggleCc = (id: string) =>
     setCcSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+  // 全选：一键勾选本类全部「已启用」条目
+  const selectAllWb = () => setWbSel(wbEnabled.map((w) => w.id))
+  const selectAllCc = () => setCcSel(ccEnabled.map((c) => c.id))
 
   const save = async () => {
     // 对话级保存：装载 + 自动更新开关写入当前会话 settings；写回前确认是全局设置
@@ -302,6 +309,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
                 disabledEntries={wbDisabled.map((w) => ({ id: w.id, name: w.name, sub: w.triggerMode === 'always' ? '始终注入' : '关键词触发', folderId: w.folderId }))}
                 selected={wbSel}
                 onToggle={toggleWb}
+                onSelectAll={selectAllWb}
                 onGoEnable={goEnable}
                 accent="#059669"
               />
@@ -314,6 +322,7 @@ const CreativeLoadSheet = NiceModal.create(({ sessionId }: { sessionId: string }
                 disabledEntries={ccDisabled.map((c) => ({ id: c.id, name: c.name, sub: c.occupation || '未知职业', folderId: c.folderId }))}
                 selected={ccSel}
                 onToggle={toggleCc}
+                onSelectAll={selectAllCc}
                 onGoEnable={goEnable}
                 accent="#059669"
               />
