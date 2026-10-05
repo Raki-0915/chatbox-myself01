@@ -25,9 +25,11 @@ import {
   IconCirclePlus,
   IconFilePencil,
   IconFolder,
+  IconMaximize,
   IconPhoto,
   IconPlayerStopFilled,
   IconWand,
+  IconX,
 } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -1041,6 +1043,38 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     }
     handleSubmitRef.current = handleSubmit
 
+    // Mod：全屏输入编辑器 —— 展开全屏大编辑区，写完同步回输入框或直接发送
+    const [fullscreenOpen, setFullscreenOpen] = useState(false)
+    const [fullscreenValue, setFullscreenValue] = useState('')
+    const openFullscreen = useCallback(() => {
+      setFullscreenValue(messageInputFieldRef.current?.getValue() ?? '')
+      setFullscreenOpen(true)
+    }, [])
+    const closeFullscreen = useCallback(() => {
+      // 关闭前同步回输入框，编辑内容不丢
+      messageInputFieldRef.current?.setValue(fullscreenValue)
+      setFullscreenOpen(false)
+    }, [fullscreenValue])
+    const fullscreenSend = useCallback(() => {
+      const value = fullscreenValue
+      messageInputFieldRef.current?.setValue(value)
+      setFullscreenOpen(false)
+      // 等输入框 state 同步完成后再走官方发送（避免读到旧值）
+      window.setTimeout(() => handleSubmitRef.current(), 0)
+    }, [fullscreenValue])
+    const onFullscreenKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          closeFullscreen()
+        } else if (event.key === 'Enter' && !event.shiftKey && !('isComposing' in event.nativeEvent && event.nativeEvent.isComposing)) {
+          event.preventDefault()
+          fullscreenSend()
+        }
+      },
+      [closeFullscreen, fullscreenSend]
+    )
+
     const onKeyDown = useCallback(
       (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (skillCommandQuery !== null && matchingInputSkills.length > 0) {
@@ -1628,6 +1662,21 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 onPaste={onPaste}
               />
 
+              {/* Mod：全屏输入入口 */}
+              <Tooltip label={t('Fullscreen input') || '全屏输入'} withArrow>
+                <ActionIcon
+                  aria-label={t('Fullscreen input') || '全屏输入'}
+                  size={32}
+                  variant="subtle"
+                  color="gray"
+                  radius="lg"
+                  className="shrink-0 mb-1"
+                  onClick={openFullscreen}
+                >
+                  <ScalableIcon icon={IconMaximize} size={16} />
+                </ActionIcon>
+              </Tooltip>
+
               <Tooltip
                 // `n` rather than `count`, so i18next does not engage plural resolution for a
                 // label that is only ever shown for more than one reply.
@@ -1670,6 +1719,50 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 </ActionIcon>
               </Tooltip>
             </Flex>
+
+            {/* Mod：全屏输入编辑器覆盖层 */}
+            {fullscreenOpen &&
+              createPortal(
+                <Box className="z-[500] fixed inset-0 flex flex-col bg-chatbox-background-primary text-chatbox-tint-primary">
+                  <Flex align="center" justify="space-between" px="md" py={8} className="border-b border-solid border-chatbox-border-primary shrink-0">
+                    <Text size="sm" fw={600}>{t('Fullscreen input') || '全屏输入'}</Text>
+                    <ActionIcon variant="subtle" color="gray" size="lg" onClick={closeFullscreen} aria-label={t('Close') || '关闭'}>
+                      <IconX size={20} />
+                    </ActionIcon>
+                  </Flex>
+                  <Textarea
+                    unstyled
+                    autoFocus
+                    data-testid="mod-fullscreen-input"
+                    placeholder={t('Type your question here...') || ''}
+                    value={fullscreenValue}
+                    onChange={(e) => setFullscreenValue(e.currentTarget.value)}
+                    onKeyDown={onFullscreenKeyDown}
+                    classNames={{
+                      root: 'flex-1 min-h-0',
+                      wrapper: 'flex-1 min-h-0',
+                      input: 'w-full h-full outline-none border-none resize-none px-4 py-3 bg-transparent leading-7',
+                    }}
+                    styles={{ input: { fontSize: 15 } }}
+                  />
+                  <Flex align="center" justify="space-between" px="md" py={10} className="border-t border-solid border-chatbox-border-primary shrink-0">
+                    <Text size="xs" c="dimmed">
+                      {t('Enter to send · Shift+Enter for newline · Esc to close') || 'Enter 发送 · Shift+Enter 换行 · Esc 关闭'}
+                    </Text>
+                    <Button
+                      size="md"
+                      radius="lg"
+                      color="chatbox-brand"
+                      disabled={!fullscreenValue.trim()}
+                      onClick={fullscreenSend}
+                      leftSection={<ScalableIcon icon={IconArrowUp} size={16} />}
+                    >
+                      {t('Send') || '发送'}
+                    </Button>
+                  </Flex>
+                </Box>,
+                document.body
+              )}
 
             {(!!pictureKeys.length || !!attachments.length) && (
               <Flex
