@@ -33,6 +33,8 @@ export const modLogAtom = atom<ModLogEntry[]>([])
 export const modBackupsAtom = atom<ModBackup[]>([])
 /** 对话存档分支点（会话级） */
 export const bookmarksAtom = atom<SessionBookmark[]>([])
+/** 群聊点名发言：本轮回合由哪个角色带头（一次性，prompt 注入时消费后清空） */
+export const groupSpotlightAtom = atom<string | null>(null)
 
 /** 是否已从存储加载过（避免并发重复加载） */
 let loaded = false

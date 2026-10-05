@@ -5,7 +5,7 @@
  * 注入位置：agent-harness 组装 instructions 时（见 agent-harness.ts 的改动）。
  */
 import { getDefaultStore } from 'jotai'
-import { characterCardsAtom, modSettingsAtom, worldBooksAtom } from './store'
+import { characterCardsAtom, groupSpotlightAtom, modSettingsAtom, worldBooksAtom } from './store'
 import type { CharacterCard, WorldBookEntry } from './types'
 import { buildAssociatedEventSection } from './event-split'
 
@@ -76,6 +76,13 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
           return bits.join(' | ')
         })
         .join('\n')
+      // 点名发言（Spotlight）：一次性消费，AI 本轮回合以点名角色带头开口
+      const spotlight = store.get(groupSpotlightAtom)
+      let spotlightLine = ''
+      if (spotlight) {
+        store.set(groupSpotlightAtom, null)
+        spotlightLine = `- 用户点击了【${spotlight}】的头像，本轮回合请让【${spotlight}】带头开口（其余角色自然接话）。`
+      }
       const groupRules = [
         '## 群聊规则',
         '- 以下是在场角色（名单按优先级排序），你是这场群像剧的导演/旁白系统：',
@@ -84,6 +91,7 @@ export async function buildWorldInjection(worldBookIds: string[], characterCardI
         '- 用户消息若标记为「系统事件」（消息名称为"系统"），表示剧情事件/环境变化，所有在场角色必须围绕该事件回应，不得忽略。',
         '- 用户未点名角色时，由与话题最相关的角色先开口，其他角色自然接话，一次回复覆盖在场角色。',
         '- 世界书设定依然有效；与角色人设冲突时以角色人设为准。',
+        spotlightLine || '',
       ].join('\n')
       const wbBudget = adaptiveInjectionBudget(settings.wbInjectionLimit, dialogText.length)
       const residentLimit = Math.min(Math.floor(wbBudget * 0.6), settings.wbInjectionLimit)

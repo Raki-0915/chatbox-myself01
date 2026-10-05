@@ -52,7 +52,8 @@ import { Trans, useTranslation } from 'react-i18next'
 import { trackAgentModeSuggestionAction } from '@/analytics/agent-mode'
 import { trackJkClickEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import { characterCardsAtom } from '@/modules/store'
+import { characterCardsAtom, modSettingsAtom } from '@/modules/store'
+import { requestGroupSpotlightGenerate } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import Markdown from '@/components/Markdown'
 import StreamingTextFade from '@/components/StreamingTextFade'
@@ -242,6 +243,13 @@ const _Message: FC<Props> = (props) => {
     if (!msg.name || msg.name === '系统') return undefined
     return groupAllCards.find((c) => c.name === msg.name)?.avatar
   }, [msg.name, groupAllCards])
+
+  // Chatbox Mod：点击角色名/头像 → 点名该角色带头发言（仅群聊模式）
+  const groupModChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
+  const handleRoleSpotlightClick = (name: string | undefined) => {
+    if (groupModChatMode !== 'group' || !name) return
+    requestGroupSpotlightGenerate(sessionId, name)
+  }
 
   const needCollapse =
     collapseThreshold &&
@@ -1414,9 +1422,16 @@ const _Message: FC<Props> = (props) => {
               isSmallScreen ? (shouldShowAvatar ? 'max-w-[calc(100%-3rem)]' : 'max-w-[95%]') : 'max-w-[85%]'
             )}
           >
-            {/* Chatbox Mod：群聊用户扮演角色 → 气泡上方显示角色名 + 角色头像 */}
+            {/* Chatbox Mod：群聊用户扮演角色 → 气泡上方显示角色名 + 角色头像（点击=点名该角色带头发言） */}
             {msg.name && msg.name !== '系统' && (
-              <Flex align="center" gap={4} className="mb-0.5 select-none" justify="flex-end">
+              <Flex
+                align="center"
+                gap={4}
+                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer')}
+                justify="flex-end"
+                title={groupModChatMode === 'group' ? `点击让${msg.name}带头发言` : undefined}
+                onClick={() => handleRoleSpotlightClick(msg.name)}
+              >
                 {groupRoleAvatar && (
                   <Box
                     component="img"
@@ -1503,9 +1518,15 @@ const _Message: FC<Props> = (props) => {
             </Box>
           )}
           <Flex direction="column" align="flex-start" className="min-w-0 flex-1 max-w-full">
-            {/* Chatbox Mod：群聊角色名 + 角色头像 */}
+            {/* Chatbox Mod：群聊角色名 + 角色头像（点击=点名该角色带头发言） */}
             {isBubbleLayout && msg.role === 'assistant' && msg.name && msg.name !== '系统' && (
-              <Flex align="center" gap={4} className="mb-0.5 select-none">
+              <Flex
+                align="center"
+                gap={4}
+                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer')}
+                title={groupModChatMode === 'group' ? `点击让${msg.name}带头发言` : undefined}
+                onClick={() => handleRoleSpotlightClick(msg.name)}
+              >
                 {groupRoleAvatar && (
                   <Box
                     component="img"

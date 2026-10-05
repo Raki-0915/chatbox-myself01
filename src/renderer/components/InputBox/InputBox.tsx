@@ -28,6 +28,7 @@ import {
   IconMaximize,
   IconPhoto,
   IconPlayerStopFilled,
+  IconUser,
   IconWand,
   IconX,
 } from '@tabler/icons-react'
@@ -55,7 +56,7 @@ import { useStore } from 'zustand'
 import { JK_PAGE_NAMES } from '@/analytics/jk-events'
 import { modSettingsAtom } from '@/modules/store'
 import { characterCardsAtom } from '@/modules/store'
-import { scheduleGroupAutoPlay } from '@/modules/group-autoplay'
+import { scheduleGroupAutoPlay, requestGroupSpotlightGenerate } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { AppTooltip as Tooltip } from '@/components/ui/tooltip'
@@ -1704,10 +1705,11 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 >
                   <Button
                     size="compact-xs"
-                    variant={groupIdentity.kind !== 'role' ? 'filled' : 'subtle'}
+                    variant={groupIdentity.kind !== 'role' ? 'filled' : 'light'}
                     color={groupIdentity.kind === 'system' ? 'orange' : groupIdentity.kind === 'char' ? 'chatbox-brand' : 'gray'}
                     className="shrink-0 mb-1"
                     radius="lg"
+                    leftSection={<IconUser />}
                     onClick={() => setGroupPickerOpen(true)}
                   >
                     {groupIdentityLabel}
@@ -2261,8 +2263,11 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                     onClick={() => {
                       setGroupIdentity({ kind: 'char', charName: c.name })
                       setGroupPickerOpen(false)
+                      // Chatbox Mod：点击头像 = 扮演该角色 + 立即点名该角色带头发言
+                      requestGroupSpotlightGenerate(currentSessionId, c.name)
                     }}
                     className="rounded-lg p-1 hover:bg-chatbox-background-secondary transition-colors"
+                    title={`点击：以${c.name}身份发言（自动让TA带头开口）`}
                   >
                     <Stack gap={4} align="center">
                       {c.avatar ? (

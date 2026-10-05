@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import { getDefaultStore } from 'jotai'
 import { buildWorldInjection } from '../src/renderer/modules/prompt.ts'
-import { modSettingsAtom, characterCardsAtom, worldBooksAtom } from '../src/renderer/modules/store.ts'
+import { modSettingsAtom, characterCardsAtom, worldBooksAtom, groupSpotlightAtom } from '../src/renderer/modules/store.ts'
 
 let passed = 0
 let failed = 0
@@ -59,6 +59,17 @@ await ok('群聊模式：世界书常驻设定仍注入', async () => {
   )
   const out = await buildWorldInjection(['w1'], ['a'], '')
   assert.ok(out.includes('加勒比海域魔法盛行'), '世界书常驻注入')
+})
+
+await ok('群聊模式：点名发言一次性注入', async () => {
+  store.set(modSettingsAtom, { ...store.get(modSettingsAtom), chatMode: 'group' })
+  withCards([{ id: 'a', name: '罗素', enabled: true }])
+  store.set(groupSpotlightAtom, '罗素')
+  const out1 = await buildWorldInjection([], ['a'], '')
+  assert.ok(out1.includes('【罗素】带头开口'), '点名角色带头开口注入')
+  // 一次性：第二次注入不再包含点名行
+  const out2 = await buildWorldInjection([], ['a'], '')
+  assert.ok(!out2.includes('带头开口'), '点名已消费，不重复注入')
 })
 
 await ok('创作模式：保持原人物卡注入格式', async () => {
