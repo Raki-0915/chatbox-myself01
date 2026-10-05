@@ -393,9 +393,29 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
     wb: newSelFiltered(diff.wb.add.length, diff.wb.update.length, diff.wb.remove, trivialWb),
     cc: newSelFiltered(diff.cc.add.length, diff.cc.update.length, diff.cc.remove, trivialCc),
   }))
-  // 关联事件追加：默认全选（只增不改，低风险），可取消
+  // 关联事件追加：默认全选（只增不改，低风险），可取消；疑似重复（带 _dedup 且未定 action）默认跳过
   const events = diff.events?.append ?? []
-  const [selEvents, setSelEvents] = useState<Set<number>>(() => new Set(events.map((_, i) => i)))
+  const skipEvents = diff.events?.skip ?? []
+  // 疑似重复条目的原始下标（带 _dedup 元数据且尚未被用户选「合并」）
+  const suspectIdx = useMemo(() => {
+    const s = new Set<number>()
+    events.forEach((e, i) => {
+      const dd = (e as Record<string, unknown>)._dedup
+      if (dd && typeof dd === 'object' && !(dd as { action?: string }).action) s.add(i)
+    })
+    return s
+  }, [events])
+  const [selEvents, setSelEvents] = useState<Set<number>>(() => new Set(events.map((_, i) => (suspectIdx.has(i) ? -1 : i)).filter((i) => i >= 0)))
+  // 用户选择「合并进原条目」的疑似条目（勾选态 + 合并标记）
+  const [mergeIdx, setMergeIdx] = useState<Set<number>>(() => new Set())
+  // 已自动跳过重复事件中，用户「恢复为新增」的条目（原始下标）
+  const [restoredSkip, setRestoredSkip] = useState<Set<number>>(() => new Set())
+  // 跳过重复列表是否展开
+  const [skipExpanded, setSkipExpanded] = useState(false)
+  // 横幅统计：新增 = 勾选（含仍新增/合并）+ 恢复；跳过 = 未勾选 + 未恢复；合并 = 合并数
+  const eventAddCount = selEvents.size + restoredSkip.size
+  const eventMergeCount = mergeIdx.size
+  const eventSkipCount = (events.length - selEvents.size) + (skipEvents.length - restoredSkip.size)
   // 编辑态：editingKey = `${group}:${name}`；editedMap 存「本次要应用的新内容」
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editedMap, setEditedMap] = useState<Record<string, string>>({})
@@ -446,17 +466,54 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
       else next.add(idx)
       return next
     })
+    // 取消勾选 = 跳过 → 同时撤销合并标记
+    setMergeIdx((m) => {
+      if (m.has(idx)) {
+        const next = new Set(m)
+        next.delete(idx)
+        return next
+      }
+      return m
+    })
+  }
+  // 疑似条目三操作：跳过 / 合并进原条目 / 仍新增
+  const eventChoose = (idx: number, act: 'skip' | 'merge' | 'add') => {
+    setSelEvents((s) => {
+      const next = new Set(s)
+      if (act === 'skip') next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+    setMergeIdx((m) => {
+      const next = new Set(m)
+      if (act === 'merge') next.add(idx)
+      else next.delete(idx)
+      return next
+    })
+  }
+  const restoreSkip = (idx: number) => {
+    setRestoredSkip((s) => {
+      const next = new Set(s)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
   }
   const toggleAll = () => {
     if (allSelected) {
       setSel({ wb: { add: new Set(), update: new Set(), remove: new Set() }, cc: { add: new Set(), update: new Set(), remove: new Set() } })
       setSelEvents(new Set())
+      setMergeIdx(new Set())
+      setRestoredSkip(new Set())
     } else {
       setSel({
         wb: newSel(diff.wb.add.length, diff.wb.update.length, diff.wb.remove),
         cc: newSel(diff.cc.add.length, diff.cc.update.length, diff.cc.remove),
       })
+      // 全部勾选 = 全部「仍新增」：清空合并标记，恢复标记清空（恢复项已在 append 外，全选不含它们）
       setSelEvents(new Set(events.map((_, i) => i)))
+      setMergeIdx(new Set())
+      setRestoredSkip(new Set())
     }
   }
 
@@ -472,6 +529,27 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
         if (edited === undefined || edited === String(it[field] ?? '')) return it
         return { ...it, [field]: edited }
       })
+    // 勾选的事件：疑似项若选了「合并」→ 带 action:'merge' 元数据（应用层合并进原条目）；
+    // 其余勾选项去掉 _dedup 元数据（= 仍新增）；未勾选 = 跳过
+    const pickedEvents = events
+      .map((e, i) => ({ e, i }))
+      .filter(({ i }) => selEvents.has(i))
+      .map(({ e, i }) => {
+        if (mergeIdx.has(i)) {
+          const dd = e._dedup
+          return { ...e, _dedup: { ...(dd as Record<string, unknown>), action: 'merge' } }
+        }
+        const { _dedup, ...rest } = e
+        return rest
+      })
+    // 恢复的 skip 项 → 仍新增（去掉元数据）
+    const restoredEvents = skipEvents
+      .map((s, i) => ({ s, i }))
+      .filter(({ i }) => restoredSkip.has(i))
+      .map(({ s }) => {
+        const { _dedup, ...rest } = s.item
+        return rest
+      })
     const result: AutoUpdateDiff = {
       wb: {
         add: pick(diff.wb.add, sel.wb.add),
@@ -483,7 +561,7 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
         update: override('cc', pick(diff.cc.update, sel.cc.update), 'backgroundStory'),
         remove: diff.cc.remove.filter((n) => sel.cc.remove.has(n)),
       },
-      events: { append: pick(events, selEvents) },
+      events: { append: [...pickedEvents, ...restoredEvents], skip: skipEvents.filter((_, i) => !restoredSkip.has(i)) },
     }
     modal.resolve(result)
     modal.remove()
@@ -539,17 +617,58 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
               {events.length > 0 && (
                 <>
                   <Divider label="关联事件（追加到角色事件区，只增不改）" labelPosition="left" />
-                  {events.map((e, i) => (
-                    <Box key={i} style={{ border: selEvents.has(i) ? '1.5px solid #2563eb' : '1px solid #e0e0e0', borderRadius: 6, padding: '4px 8px', background: selEvents.has(i) ? '#eff6ff' : '#fafafa', cursor: 'pointer' }} onClick={() => toggleEvent(i)}>
-                      <Flex align="center" gap={4}>
-                        <Checkbox size="xs" checked={selEvents.has(i)} onChange={() => toggleEvent(i)} style={{ pointerEvents: 'none' }} />
-                        <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{String(e.roleName ?? e.name ?? '（未命名）')}</Text>
-                      </Flex>
-                      <Text size="xs" style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{String(e.content ?? '')}</Text>
-                      {Array.isArray(e.keywords) && e.keywords.length > 0 ? <Text size="xs" c="blue">触发词: {e.keywords.join(' / ')}</Text> : null}
-                    </Box>
-                  ))}
+                  <Flex align="center" gap={6} style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '4px 8px' }}>
+                    <Text size="xs" fw={600} c="orange">新增 {eventAddCount} 条</Text>
+                    <Text size="xs" c="dimmed">·</Text>
+                    <Text size="xs" fw={600}>跳过重复 {eventSkipCount} 条</Text>
+                    <Text size="xs" c="dimmed">·</Text>
+                    <Text size="xs" fw={600}>合并 {eventMergeCount} 条</Text>
+                  </Flex>
+                  {events.map((e, i) => {
+                    const dd = (e as Record<string, unknown>)._dedup as { score?: number } | undefined
+                    const suspect = suspectIdx.has(i)
+                    return (
+                      <Box key={i} style={{ border: suspect ? '1.5px solid #f59f0b' : selEvents.has(i) ? '1.5px solid #2563eb' : '1px solid #e0e0e0', borderRadius: 6, padding: '4px 8px', background: suspect ? '#fffbeb' : selEvents.has(i) ? '#eff6ff' : '#fafafa', cursor: 'pointer' }} onClick={() => toggleEvent(i)}>
+                        <Flex align="center" gap={4}>
+                          <Checkbox size="xs" checked={selEvents.has(i)} onChange={() => toggleEvent(i)} style={{ pointerEvents: 'none' }} />
+                          <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{String(e.roleName ?? e.name ?? '（未命名）')}</Text>
+                          {suspect && dd && typeof dd.score === 'number' ? (
+                            <Badge color="orange" size="xs" variant="light">疑似重复 {Math.round(dd.score * 100)}%</Badge>
+                          ) : null}
+                        </Flex>
+                        <Text size="xs" style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{String(e.content ?? '')}</Text>
+                        {Array.isArray(e.keywords) && e.keywords.length > 0 ? <Text size="xs" c="blue">触发词: {e.keywords.join(' / ')}</Text> : null}
+                        {suspect ? (
+                          <Group gap={4} mt={4}>
+                            <Button size="xs" variant={!selEvents.has(i) && !mergeIdx.has(i) ? 'filled' : 'subtle'} color="gray" onClick={() => eventChoose(i, 'skip')}>跳过</Button>
+                            <Button size="xs" variant={mergeIdx.has(i) ? 'filled' : 'subtle'} color="orange" onClick={() => eventChoose(i, 'merge')}>合并进原条目</Button>
+                            <Button size="xs" variant={selEvents.has(i) && !mergeIdx.has(i) ? 'filled' : 'subtle'} color="blue" onClick={() => eventChoose(i, 'add')}>仍新增</Button>
+                          </Group>
+                        ) : null}
+                      </Box>
+                    )
+                  })}
                 </>
+              )}
+              {skipEvents.length > 0 && (
+                <Box style={{ border: '1px dashed #d0d0d0', borderRadius: 6, padding: '4px 8px' }}>
+                  <Flex align="center" gap={4} style={{ cursor: 'pointer' }} onClick={() => setSkipExpanded((v) => !v)}>
+                    <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>已自动跳过重复事件 {skipEvents.length - restoredSkip.size} 条</Text>
+                    <Text size="xs" c="dimmed">{skipExpanded ? '收起 ▲' : '展开 ▼'}</Text>
+                  </Flex>
+                  {skipExpanded &&
+                    skipEvents.map((s, i) => (
+                      <Box key={i} style={{ borderTop: '1px dashed #eee', paddingTop: 4, marginTop: 4 }}>
+                        <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>{String(s.item.content ?? '')}</Text>
+                        <Flex align="center" gap={6} mt={2}>
+                          <Text size="xs" c="dimmed">与现有条目重复 {Math.round(s.score * 100)}%</Text>
+                          <Button size="xs" variant={restoredSkip.has(i) ? 'filled' : 'subtle'} color="blue" onClick={() => restoreSkip(i)}>
+                            {restoredSkip.has(i) ? '取消恢复' : '恢复为新增'}
+                          </Button>
+                        </Flex>
+                      </Box>
+                    ))}
+                </Box>
               )}
             </Stack>
           </Box>

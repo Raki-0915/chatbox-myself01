@@ -1722,6 +1722,23 @@ function AutoUpdateTab() {
         onChange={(e) => void updateModSettings({ requireConfirm: e.currentTarget.checked })}
       />
       <Box>
+        <Text size="sm" fw={600}>事件判重敏感度</Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          自动更新追加角色事件前自动查重：重复的直接跳过（预览可恢复）；「疑似重复」在预览里标橙，由你选择跳过/合并/仍新增。严格 = 只跳过几乎一样的；宽松 = 相似度高一点就跳过。
+        </Text>
+        <SegmentedControl
+          size="xs"
+          fullWidth
+          value={settings.eventDedupSensitivity ?? 'standard'}
+          onChange={(v) => void updateModSettings({ eventDedupSensitivity: v as 'strict' | 'standard' | 'loose' })}
+          data={[
+            { label: '严格', value: 'strict' },
+            { label: '标准', value: 'standard' },
+            { label: '宽松', value: 'loose' },
+          ]}
+        />
+      </Box>
+      <Box>
         <Text size="sm" fw={600}>分析最近消息数</Text>
         <Text size="xs" c="dimmed" mb={6}>
           自动更新分析时取最近多少条消息（用户与 AI 回复都计入）。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。

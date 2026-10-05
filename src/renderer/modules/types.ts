@@ -95,8 +95,17 @@ export interface ModFolder {
 export interface AutoUpdateDiff {
   wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
   cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
-  /** 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区 append，只增不改 */
-  events?: { append: Array<Record<string, unknown>> }
+  /**
+   * 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区 append，只增不改。
+   * append 项可带 _dedup 元数据（事件去重合并，见 event-dedup.ts）：
+   *   - { score, targetId }            = 疑似重复，等待用户在预览中定夺（跳过/合并/仍新增）
+   *   - { score, targetId, action:'merge' } = 用户选择「合并进原条目」→ 应用时执行合并
+   * skip = 已判定的重复事件（自动跳过 / 预览中用户选择跳过），可展开查看、可一键恢复
+   */
+  events?: {
+    append: Array<Record<string, unknown>>
+    skip?: Array<{ item: Record<string, unknown>; targetId: string; score: number }>
+  }
 }
 
 /** 自动更新事件日志 */
@@ -134,6 +143,8 @@ export interface ModSettings {
   siliconflowApiKey?: string
   /** 移动端模式：创作模式（现有对话模式改名，浅色主题）| 聊天模式（群聊，强制深色主题） */
   chatMode?: 'creation' | 'group'
+  /** 事件判重敏感度：strict 严格 | standard 标准（默认）| loose 宽松 */
+  eventDedupSensitivity?: 'strict' | 'standard' | 'loose'
 }
 
 /** 会话装载目标 */

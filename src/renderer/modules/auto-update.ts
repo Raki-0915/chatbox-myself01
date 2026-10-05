@@ -9,6 +9,7 @@ import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
 import { applyFrozenProtection } from './frozen-text'
 import { runConfirmGate } from './confirm-gate'
 import { applyRemoveGuard, appendEvents } from './event-split'
+import { dedupDiffEvents, canMerge, mergeEvent, DEFAULT_EVENT_SENSITIVITY } from './event-dedup'
 
 export { similarityRatio, SIMILARITY_TRIVIAL }
 
@@ -170,6 +171,10 @@ export interface AutoUpdateResult {
   ccRemove: number
   /** 关联事件追加条数（剧情进展 → 角色事件区 append） */
   eventsAdd: number
+  /** 关联事件重复跳过条数（自动判重，预览可展开/恢复） */
+  eventsSkip: number
+  /** 关联事件合并条数（疑似重复 → 聚合进原条目） */
+  eventsMerge: number
 }
 
 /** 更新预览：模型算出的差异，交给 UI 弹窗展示并让用户确认 */
@@ -187,11 +192,11 @@ export async function maybeAutoUpdateWorldBooks(
   opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null> } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
-  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
+  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0, eventsSkip: 0, eventsMerge: 0 }
   if (opts.force) updating = false
   updating = true
 
-  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
+  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0, eventsSkip: 0, eventsMerge: 0 }
   try {
     const store = getDefaultStore()
     const settings = store.get(modSettingsAtom)
@@ -252,6 +257,15 @@ export async function maybeAutoUpdateWorldBooks(
         const c = ccByName.get(name)
         return (c?.frozenTexts?.length ?? 0) > 0 || (c?.associatedEvents?.length ?? 0) > 0
       }
+    )
+
+    // 事件去重分流（方案书：任务方案书_角色知识库事件去重合并）：每次追加前自动判重，
+    // 重复 → 跳过（可预览/恢复）；疑似 → 进预览人工定夺（自动模式保守跳过）；新增 → 正常追加
+    diff = dedupDiffEvents(
+      diff,
+      ccByName as Map<string, { associatedEvents?: Array<{ id: string; content: string; keywords?: string[]; frozen?: boolean }> }>,
+      settings.eventDedupSensitivity ?? DEFAULT_EVENT_SENSITIVITY,
+      settings.requireConfirm
     )
 
     // 人工确认（可配置）：优先展示「更新预览」供用户逐条勾选（返回勾选后的差异）
@@ -392,16 +406,47 @@ export async function maybeAutoUpdateWorldBooks(
       result.ccRemove++
     }
 
-    // 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区末尾，累积不覆盖
+    // 关联事件追加（背景/事件分流 + 去重合并）：剧情进展 → 对应角色事件区末尾。
+    // 按角色聚合后统一写回（避免同卡多事件相互覆盖）；_dedup.action==='merge' 的
+    // 项合并进目标事件（只增不覆盖，触发词去重）；其余正常追加
     const eventsAppend = diff.events?.append ?? []
+    const eventsByRole = new Map<string, Array<Record<string, unknown>>>()
     for (const item of eventsAppend) {
-      const roleName = str(item.roleName) || str(item.name)
+      const roleName = String(item.roleName ?? item.name ?? '').trim()
       if (!roleName) continue
       const card = ccByName.get(roleName)
       if (!card) continue // 归属角色卡不存在 → 跳过（不散落无关数据）
-      await addOrUpdateCharacterCard(appendEvents(card, [item]))
-      result.eventsAdd++
+      const list = eventsByRole.get(roleName) ?? []
+      list.push(item)
+      eventsByRole.set(roleName, list)
     }
+    for (const [roleName, items] of eventsByRole) {
+      const card = ccByName.get(roleName)
+      if (!card) continue
+      let local: CharacterCard = card
+      for (const item of items) {
+        const dd = (item._dedup ?? null) as { score?: number; targetId?: string; action?: 'merge' } | null
+        if (dd && typeof dd === 'object' && dd.action === 'merge') {
+          const targetId = String(dd.targetId ?? '')
+          const target = (local.associatedEvents ?? []).find((e) => e.id === targetId)
+          // 冻结/超限目标不可合并 → 降级为仍新增（方案书 3.3）
+          if (target && canMerge(target)) {
+            local = {
+              ...local,
+              associatedEvents: (local.associatedEvents ?? []).map((e) =>
+                e.id === targetId ? mergeEvent(target, item) : e
+              ),
+            }
+            result.eventsMerge++
+            continue
+          }
+        }
+        local = appendEvents(local, [item])
+        result.eventsAdd++
+      }
+      await addOrUpdateCharacterCard(local)
+    }
+    result.eventsSkip += diff.events?.skip?.length ?? 0
 
     // 装载变化写回会话
     if (binding.worldBookIds.length > 0 || binding.characterCardIds.length > 0) {
