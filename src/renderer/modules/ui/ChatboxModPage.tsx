@@ -68,7 +68,15 @@ import type { SessionMetaLike } from '../session'
 import { forceUnlockAutoUpdate, isAutoUpdateRunning, maybeAutoUpdateWorldBooks } from '../auto-update'
 import { buildExportPayload, importModData } from '../export'
 import { ExportModal, type ExportModalConfig } from './ExportModal'
-import { isPngBytes, parseCharacterCardJson, parseCharacterCardPng, mapTavernCardToMod } from '../png-character-import'
+import {
+  detectCardJsonFormat,
+  diagnosePngCard,
+  isPngBytes,
+  parseCharacterCardJson,
+  parseCharacterCardPng,
+  mapTavernCardToMod,
+  type TavernCardData,
+} from '../png-character-import'
 import { toggleFrozen } from '../frozen-text'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
@@ -378,22 +386,27 @@ function MoveFolderSelect({ kind, folders, ids, onMoved }: { kind: 'wb' | 'cc'; 
   )
 }
 
-/** 读取导入文件并解析为条目数组（兼容 3 种格式：条目数组 / 单条对象 / {worldBooks|characterCards:[...]} 导出包） */
+/** 解析导入 JSON 文本为条目数组（兼容 3 种格式：条目数组 / 单条对象 / {worldBooks|characterCards:[...]} 导出包） */
+function parseJsonArrayText(text: string): unknown[] {
+  const parsed = JSON.parse(text)
+  if (Array.isArray(parsed)) return parsed
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>
+    if (Array.isArray(obj.characterCards)) return obj.characterCards
+    if (Array.isArray(obj.worldBooks)) return obj.worldBooks
+    // 单条对象（如单张人物卡 { name: "罗素", ... }）
+    if (typeof obj.name === 'string') return [obj]
+  }
+  return []
+}
+
+/** 读取导入文件并解析为条目数组（复用 parseJsonArrayText，兼容 3 种格式） */
 function readJsonArrayFile(file: File): Promise<unknown[]> {
   return new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onload = () => {
       try {
-        const parsed = JSON.parse(String(r.result))
-        if (Array.isArray(parsed)) return resolve(parsed)
-        if (parsed && typeof parsed === 'object') {
-          const obj = parsed as Record<string, unknown>
-          if (Array.isArray(obj.characterCards)) return resolve(obj.characterCards)
-          if (Array.isArray(obj.worldBooks)) return resolve(obj.worldBooks)
-          // 单条对象（如单张人物卡 { name: "罗素", ... }）
-          if (typeof obj.name === 'string') return resolve([obj])
-        }
-        resolve([])
+        resolve(parseJsonArrayText(String(r.result)))
       } catch (e) {
         reject(e)
       }
@@ -449,6 +462,30 @@ export function WorldBooksTab() {
     openExport()
   }
 
+  // 内部格式数组 → 逐条落库（数组 / 单条 / 导出包）
+  const importWorldBooksFromArray = async (arr: unknown[]) => {
+    let n = 0
+    for (const raw of arr) {
+      const it = raw as Partial<WorldBookEntry>
+      if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
+      await addOrUpdateWorldBook({
+        id: typeof it.id === 'string' && it.id ? it.id : uuidv4(),
+        name: it.name.trim(),
+        content: typeof it.content === 'string' ? it.content : '',
+        keywords: Array.isArray(it.keywords) ? it.keywords.map(String) : [],
+        enabled: it.enabled !== false,
+        triggerMode: it.triggerMode === 'always' || it.triggerMode === 'regex' ? it.triggerMode : 'keyword',
+        depth: typeof it.depth === 'number' ? it.depth : undefined,
+        folderId: typeof it.folderId === 'string' ? it.folderId : undefined,
+        order: Number(it.order) || 0,
+        createdAt: typeof it.createdAt === 'number' ? it.createdAt : Date.now(),
+        updatedAt: Date.now(),
+      })
+      n++
+    }
+    return n
+  }
+
   const doImport = async (file: File | null) => {
     if (!file) return
     setImporting(true)
@@ -457,27 +494,29 @@ export function WorldBooksTab() {
       const text = await file.text()
       const { parseWorldInfo } = await import('../world-info-import')
       const wi = parseWorldInfo(text)
-      const arr = wi ? (wi as unknown as unknown[]) : await readJsonArrayFile(file)
-      let n = 0
-      for (const raw of arr) {
-        const it = raw as Partial<WorldBookEntry>
-        if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
-        await addOrUpdateWorldBook({
-          id: typeof it.id === 'string' && it.id ? it.id : uuidv4(),
-          name: it.name.trim(),
-          content: typeof it.content === 'string' ? it.content : '',
-          keywords: Array.isArray(it.keywords) ? it.keywords.map(String) : [],
-          enabled: it.enabled !== false,
-          triggerMode: it.triggerMode === 'always' || it.triggerMode === 'regex' ? it.triggerMode : 'keyword',
-          depth: typeof it.depth === 'number' ? it.depth : undefined,
-          folderId: typeof it.folderId === 'string' ? it.folderId : undefined,
-          order: Number(it.order) || 0,
-          createdAt: typeof it.createdAt === 'number' ? it.createdAt : Date.now(),
-          updatedAt: Date.now(),
-        })
-        n++
-      }
+      const arr = wi ? (wi as unknown as unknown[]) : parseJsonArrayText(text)
+      const n = await importWorldBooksFromArray(arr)
       setMsg(arr.length === 0 ? '导入 0 条：文件中没有可识别的世界书（支持数组 / 单条 / 导出包 / 酒馆 World Info JSON·CSV 格式）' : `导入完成：${n} 条世界书`)
+    } catch (e) {
+      setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // 粘贴 JSON 导入（绕开文件传输重编码）
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const doPasteImport = async () => {
+    if (!pasteText.trim()) return
+    setImporting(true)
+    try {
+      const { parseWorldInfo } = await import('../world-info-import')
+      const wi = parseWorldInfo(pasteText)
+      const arr = wi ? (wi as unknown as unknown[]) : parseJsonArrayText(pasteText)
+      const n = await importWorldBooksFromArray(arr)
+      setMsg(arr.length === 0 ? '导入 0 条：粘贴内容中没有可识别的世界书（支持数组 / 单条 / 导出包 / 酒馆 World Info JSON·CSV 格式）' : `导入完成：${n} 条世界书`)
+      if (n > 0) setPasteText('')
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -527,6 +566,7 @@ export function WorldBooksTab() {
               <input type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
             </label>
           </Tooltip>
+          <Button size="xs" variant="default" onClick={() => setPasteOpen((v) => !v)}>粘贴导入</Button>
           <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
           {bs.mode ? (
             <Button size="xs" variant="filled" color="green" onClick={() => { bs.setMode(false); bs.clear() }}>完成</Button>
@@ -539,6 +579,23 @@ export function WorldBooksTab() {
           {!bs.mode && <Button size="xs" onClick={openNew}>+ 新建世界书</Button>}
         </Group>
       </Group>
+      {pasteOpen && (
+        <Stack gap={6}>
+          <Textarea
+            size="xs"
+            autosize
+            minRows={3}
+            maxRows={8}
+            placeholder="粘贴世界书 JSON 文本（内部数组 / 单条 / 导出包 / 酒馆 World Info JSON），绕开文件传输问题"
+            value={pasteText}
+            onChange={(e) => setPasteText(e.currentTarget.value)}
+          />
+          <Group justify="flex-end">
+            <Button size="compact-xs" variant="default" onClick={() => setPasteOpen(false)}>取消</Button>
+            <Button size="compact-xs" color="green" loading={importing} onClick={() => void doPasteImport()}>粘贴导入</Button>
+          </Group>
+        </Stack>
+      )}
       <TextInput
         placeholder="按名称、关键词搜索……"
         value={query}
@@ -803,71 +860,127 @@ export function CharactersTab() {
     openExport()
   }
 
+  // 酒馆/CCv3 卡 → 内部人物卡落库（PNG 与 JSON 共用；PNG 额外带头像）
+  const importTavernCard = async (tavern: TavernCardData, avatar?: string) => {
+    const m = mapTavernCardToMod(tavern)
+    const card = createEmptyCharacterCard()
+    card.name = m.fields.name
+    card.backgroundStory = m.fields.backgroundStory
+    card.personalityType = m.fields.personalityType
+    card.customAttributes = m.fields.customAttributes
+    card.characterBook = m.bookEntries.map((e) => ({
+      id: uuidv4(),
+      name: e.name,
+      keywords: e.keywords,
+      content: e.content,
+      comment: e.comment,
+      triggerMode: e.triggerMode,
+      depth: e.depth,
+      order: e.order,
+      enabled: e.enabled,
+    }))
+    card.avatar = avatar
+    await addOrUpdateCharacterCard(card)
+    return card
+  }
+
+  // 内部格式数组 → 逐张落库（数组 / 单卡 / 导出包）
+  const importCardsFromArray = async (arr: unknown[]) => {
+    let n = 0
+    for (const raw of arr) {
+      const it = raw as Partial<CharacterCard>
+      if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
+      const card = createEmptyCharacterCard()
+      card.id = typeof it.id === 'string' && it.id ? it.id : uuidv4()
+      card.name = it.name.trim()
+      card.age = typeof it.age === 'string' ? it.age : ''
+      card.gender = typeof it.gender === 'string' ? it.gender : ''
+      card.occupation = typeof it.occupation === 'string' ? it.occupation : ''
+      card.appearance = typeof it.appearance === 'string' ? it.appearance : ''
+      card.height = typeof it.height === 'string' ? it.height : ''
+      card.weight = typeof it.weight === 'string' ? it.weight : ''
+      card.distinguishingFeatures = typeof it.distinguishingFeatures === 'string' ? it.distinguishingFeatures : ''
+      card.personalityType = typeof it.personalityType === 'string' ? it.personalityType : ''
+      card.strengths = typeof it.strengths === 'string' ? it.strengths : ''
+      card.weaknesses = typeof it.weaknesses === 'string' ? it.weaknesses : ''
+      card.hobbies = typeof it.hobbies === 'string' ? it.hobbies : ''
+      card.backgroundStory = typeof it.backgroundStory === 'string' ? it.backgroundStory : ''
+      card.relationships = Array.isArray(it.relationships) ? it.relationships.map((r) => ({ targetName: String(r?.targetName ?? ''), relation: String(r?.relation ?? ''), description: String(r?.description ?? '') })) : []
+      card.customAttributes = Array.isArray(it.customAttributes) ? it.customAttributes.map((a) => ({ key: String(a?.key ?? ''), value: String(a?.value ?? '') })) : []
+      card.avatar = typeof it.avatar === 'string' ? it.avatar : undefined
+      card.folderId = typeof it.folderId === 'string' ? it.folderId : undefined
+      card.enabled = it.enabled !== false
+      await addOrUpdateCharacterCard(card)
+      n++
+    }
+    return n
+  }
+
+  // 导入 JSON 文本（CCv3 / 酒馆 / 内部格式统一识别，A 阶段智能导入）
+  const importCardText = async (text: string) => {
+    const fmt = detectCardJsonFormat(text)
+    if (fmt === 'ccv3' || fmt === 'tavern') {
+      const tavern = parseCharacterCardJson(text)
+      if (tavern) {
+        const card = await importTavernCard(tavern)
+        setMsg(`导入完成：1 张人物卡「${card.name}」${card.characterBook.length > 0 ? `（含 ${card.characterBook.length} 条世界书条目）` : ''}`)
+        return true
+      }
+    }
+    const arr = parseJsonArrayText(text)
+    const n = await importCardsFromArray(arr)
+    setMsg(arr.length === 0 ? '导入 0 张：文件中没有可识别的人物卡（支持数组 / 单卡 / 导出包 / CCv3·酒馆 JSON / PNG 人物卡格式）' : `导入完成：${n} 张人物卡`)
+    return arr.length > 0
+  }
+
   const doImport = async (file: File | null) => {
     if (!file) return
     setImporting(true)
     try {
       const buf = new Uint8Array(await file.arrayBuffer())
       const isPng = isPngBytes(buf)
-      let n = 0
       if (isPng) {
         // PNG 人物卡：解析 tEXt 内嵌数据（ccv3 / chara），立绘存头像
         const tavern = parseCharacterCardPng(buf)
         if (!tavern) {
-          setMsg('导入 0 张：这个 PNG 里没有识别到人物卡数据（需要酒馆/Chub 标准的 ccv3 或 chara 数据块）')
+          // A 阶段：失败分级诊断，明确原因与建议
+          const d = diagnosePngCard(buf)
+          const hint =
+            d.branch === 'no-chunk'
+              ? '这个 PNG 里没有识别到人物卡数据——疑似被聊天/相册「保存图片」重编码剥掉了数据块，请改用「文件」方式传输原始 PNG。'
+              : d.branch === 'no-keyword'
+                ? `这个 PNG 有 ${d.chunkCount ?? 0} 个文本块，但没有标准的 ccv3/chara 人物卡数据，不是人物卡 PNG。`
+                : d.branch === 'json-error'
+                  ? `PNG 里的人物卡数据损坏（${d.error}），无法解析。`
+                  : d.branch === 'no-name'
+                    ? 'PNG 里有人物卡数据，但缺少角色名（name），无法导入。'
+                    : '这个 PNG 里没有识别到人物卡数据（需要酒馆/Chub 标准的 ccv3 或 chara 数据块）。'
+          setMsg(`导入 0 张：${hint}`)
           return
         }
-        const m = mapTavernCardToMod(tavern)
-        const card = createEmptyCharacterCard()
-        card.name = m.fields.name
-        card.backgroundStory = m.fields.backgroundStory
-        card.personalityType = m.fields.personalityType
-        card.customAttributes = m.fields.customAttributes
-        card.characterBook = m.bookEntries.map((e) => ({
-          id: uuidv4(),
-          name: e.name,
-          keywords: e.keywords,
-          content: e.content,
-          comment: e.comment,
-          triggerMode: e.triggerMode,
-          depth: e.depth,
-          order: e.order,
-          enabled: e.enabled,
-        }))
-        card.avatar = await pngToAvatarDataUrl(file)
-        await addOrUpdateCharacterCard(card)
-        n = 1
+        const card = await importTavernCard(tavern, await pngToAvatarDataUrl(file))
         setMsg(`导入完成：1 张 PNG 人物卡「${card.name}」${card.characterBook.length > 0 ? `（含 ${card.characterBook.length} 条世界书条目）` : ''}`)
         return
       }
-      const arr = await readJsonArrayFile(file)
-      for (const raw of arr) {
-        const it = raw as Partial<CharacterCard>
-        if (!it || typeof it.name !== 'string' || !it.name.trim()) continue
-        const card = createEmptyCharacterCard()
-        card.id = typeof it.id === 'string' && it.id ? it.id : uuidv4()
-        card.name = it.name.trim()
-        card.age = typeof it.age === 'string' ? it.age : ''
-        card.gender = typeof it.gender === 'string' ? it.gender : ''
-        card.occupation = typeof it.occupation === 'string' ? it.occupation : ''
-        card.appearance = typeof it.appearance === 'string' ? it.appearance : ''
-        card.height = typeof it.height === 'string' ? it.height : ''
-        card.weight = typeof it.weight === 'string' ? it.weight : ''
-        card.distinguishingFeatures = typeof it.distinguishingFeatures === 'string' ? it.distinguishingFeatures : ''
-        card.personalityType = typeof it.personalityType === 'string' ? it.personalityType : ''
-        card.strengths = typeof it.strengths === 'string' ? it.strengths : ''
-        card.weaknesses = typeof it.weaknesses === 'string' ? it.weaknesses : ''
-        card.hobbies = typeof it.hobbies === 'string' ? it.hobbies : ''
-        card.backgroundStory = typeof it.backgroundStory === 'string' ? it.backgroundStory : ''
-        card.relationships = Array.isArray(it.relationships) ? it.relationships.map((r) => ({ targetName: String(r?.targetName ?? ''), relation: String(r?.relation ?? ''), description: String(r?.description ?? '') })) : []
-        card.customAttributes = Array.isArray(it.customAttributes) ? it.customAttributes.map((a) => ({ key: String(a?.key ?? ''), value: String(a?.value ?? '') })) : []
-        card.avatar = typeof it.avatar === 'string' ? it.avatar : undefined
-        card.folderId = typeof it.folderId === 'string' ? it.folderId : undefined
-        card.enabled = it.enabled !== false
-        await addOrUpdateCharacterCard(card)
-        n++
-      }
-      setMsg(arr.length === 0 ? '导入 0 张：文件中没有可识别的人物卡（支持数组 / 单卡 / 导出包 / PNG 人物卡格式）' : `导入完成：${n} 张人物卡`)
+      // JSON：统一格式识别分流（CCv3 包装 / 顶层酒馆 / 内部格式）
+      const text = await file.text()
+      await importCardText(text)
+    } catch (e) {
+      setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // 粘贴 JSON 导入（绕开文件传输重编码，最稳路径）
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const doPasteImport = async () => {
+    if (!pasteText.trim()) return
+    setImporting(true)
+    try {
+      await importCardText(pasteText)
+      setPasteText('')
     } catch (e) {
       setMsg(`导入失败：${String((e as Error)?.message ?? e)}`)
     } finally {
@@ -919,6 +1032,7 @@ export function CharactersTab() {
               <input type="file" accept="application/json,image/png" style={{ display: 'none' }} onChange={(e) => void doImport(e.target.files?.[0] ?? null)} />
             </label>
           </Tooltip>
+          <Button size="xs" variant="default" onClick={() => setPasteOpen((v) => !v)}>粘贴导入</Button>
           <Button size="xs" variant="default" onClick={() => void doExport()}>导出</Button>
           {bs.mode ? (
             <Button size="xs" variant="filled" color="green" onClick={() => { bs.setMode(false); bs.clear() }}>完成</Button>
@@ -934,6 +1048,23 @@ export function CharactersTab() {
           {!bs.mode && <Button size="xs" onClick={openNew}>+ 新建人物卡</Button>}
         </Group>
       </Group>
+      {pasteOpen && (
+        <Stack gap={6}>
+          <Textarea
+            size="xs"
+            autosize
+            minRows={3}
+            maxRows={8}
+            placeholder="粘贴 CCv3 / 酒馆 JSON 卡文本（或内部数组 / 单卡 / 导出包 JSON），绕开文件传输重编码"
+            value={pasteText}
+            onChange={(e) => setPasteText(e.currentTarget.value)}
+          />
+          <Group justify="flex-end">
+            <Button size="compact-xs" variant="default" onClick={() => setPasteOpen(false)}>取消</Button>
+            <Button size="compact-xs" color="green" loading={importing} onClick={() => void doPasteImport()}>粘贴导入</Button>
+          </Group>
+        </Stack>
+      )}
       <TextInput
         placeholder="按名称、职业、性格等搜索……"
         value={query}

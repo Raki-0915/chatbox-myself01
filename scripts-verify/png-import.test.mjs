@@ -8,6 +8,8 @@ import {
   parsePngTextChunks,
   parseCharacterCardPng,
   parseCharacterCardJson,
+  detectCardJsonFormat,
+  diagnosePngCard,
   mapTavernCardToMod,
 } from '../src/renderer/modules/png-character-import.ts'
 
@@ -176,6 +178,102 @@ ok('mapTavernCardToMod：世界书条目映射', () => {
   assert.equal(kw.depth, 1)
   assert.equal(kw.enabled, true)
 })
+
+// ===== A 阶段：智能导入（格式识别 + PNG 失败诊断） =====
+
+const wrappedCcv3 = JSON.stringify({
+  spec: 'chara_card_v2',
+  data: {
+    name: '包装卡',
+    description: '描述',
+    personality: '性格',
+    first_mes: '开场',
+  },
+})
+const tavernTopLevel = JSON.stringify({
+  name: '顶层酒馆卡',
+  description: '描述',
+  personality: '性格',
+  first_mes: '开场',
+  scenario: '场景',
+})
+const internalSingle = JSON.stringify({
+  name: '内部单卡',
+  backgroundStory: '背景',
+  age: '28',
+  customAttributes: [{ key: 'k', value: 'v' }],
+})
+const nameOnly = JSON.stringify({ name: '仅名字' })
+const internalArray = JSON.stringify([{ name: 'A' }, { name: 'B' }])
+const exportPkg = JSON.stringify({ characterCards: [{ name: 'C' }], worldBooks: [{ name: 'W' }] })
+
+ok('detectCardJsonFormat：数组 → array', () => {
+  assert.equal(detectCardJsonFormat(internalArray), 'array')
+})
+ok('detectCardJsonFormat：导出包 → array（characterCards 优先）', () => {
+  assert.equal(detectCardJsonFormat(exportPkg), 'array')
+})
+ok('detectCardJsonFormat：{spec,data} CCv3 → ccv3', () => {
+  assert.equal(detectCardJsonFormat(wrappedCcv3), 'ccv3')
+})
+ok('detectCardJsonFormat：{data:{name}} 包装 → ccv3', () => {
+  assert.equal(detectCardJsonFormat(JSON.stringify({ data: { name: 'X' } })), 'ccv3')
+})
+ok('detectCardJsonFormat：顶层酒馆卡 → tavern', () => {
+  assert.equal(detectCardJsonFormat(tavernTopLevel), 'tavern')
+})
+ok('detectCardJsonFormat：内部单卡（有内部特征）→ internal', () => {
+  assert.equal(detectCardJsonFormat(internalSingle), 'internal')
+})
+ok('detectCardJsonFormat：仅 name → internal（零回归）', () => {
+  assert.equal(detectCardJsonFormat(nameOnly), 'internal')
+})
+ok('detectCardJsonFormat：非法 JSON → unknown', () => {
+  assert.equal(detectCardJsonFormat('not json{'), 'unknown')
+})
+
+ok('parseCharacterCardJson：包装式 CCv3 → 解析出卡', () => {
+  const card = parseCharacterCardJson(wrappedCcv3)
+  assert.ok(card)
+  assert.equal(card.name, '包装卡')
+})
+ok('parseCharacterCardJson：顶层酒馆卡 → 解析出卡', () => {
+  const card = parseCharacterCardJson(tavernTopLevel)
+  assert.ok(card)
+  assert.equal(card.name, '顶层酒馆卡')
+})
+ok('parseCharacterCardJson：缺 name → null', () => {
+  assert.equal(parseCharacterCardJson(JSON.stringify({ description: 'x' })), null)
+})
+
+ok('diagnosePngCard：无 tEXt → no-chunk', () => {
+  const r = diagnosePngCard(makePng([]))
+  assert.equal(r.branch, 'no-chunk')
+})
+ok('diagnosePngCard：有 tEXt 但无 ccv3/chara → no-keyword', () => {
+  const r = diagnosePngCard(makePng([{ keyword: 'Comment', text: 'hello' }]))
+  assert.equal(r.branch, 'no-keyword')
+  assert.equal(r.chunkCount, 1)
+})
+ok('diagnosePngCard：ccv3 JSON 损坏 → json-error', () => {
+  const r = diagnosePngCard(makePng([{ keyword: 'ccv3', text: '{broken' }]))
+  assert.equal(r.branch, 'json-error')
+  assert.ok(r.error)
+})
+ok('diagnosePngCard：ccv3 缺 name → no-name', () => {
+  const r = diagnosePngCard(makePng([{ keyword: 'ccv3', text: JSON.stringify({ description: 'x' }) }]))
+  assert.equal(r.branch, 'no-name')
+})
+ok('diagnosePngCard：正常卡 → ok', () => {
+  const r = diagnosePngCard(makePng([{ keyword: 'ccv3', text: JSON.stringify(ccv3Card) }]))
+  assert.equal(r.branch, 'ok')
+})
+ok('diagnosePngCard：chara base64 正常 → ok', () => {
+  const b64 = Buffer.from(JSON.stringify({ name: '罗素', description: 'd' })).toString('base64')
+  const r = diagnosePngCard(makePng([{ keyword: 'chara', text: b64 }]))
+  assert.equal(r.branch, 'ok')
+})
+
 
 console.log(`\n全部通过：${passed} 个用例${failed > 0 ? `，失败 ${failed} 个` : ''}`)
 process.exit(failed > 0 ? 1 : 0)

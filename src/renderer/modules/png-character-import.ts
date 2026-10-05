@@ -184,6 +184,90 @@ export function parseCharacterCardJson(text: string): TavernCardData | null {
   }
 }
 
+/** 人物卡 JSON 文本格式识别结果（A 阶段智能导入） */
+export type CardJsonFormat = 'array' | 'ccv3' | 'tavern' | 'internal' | 'unknown'
+
+/** 内部单卡独有特征字段（命中即视为本项目原生格式） */
+const INTERNAL_FEATURE_KEYS = ['backgroundStory', 'age', 'characterBook', 'customAttributes'] as const
+/** 酒馆顶层卡特征字段（命中且无内部特征时视为酒馆卡） */
+const TAVERN_FEATURE_KEYS = ['description', 'personality', 'first_mes', 'scenario'] as const
+
+/**
+ * 识别人物卡 JSON 文本的格式，按优先级防误判：
+ * 1. 数组 → 内部数组；2. 有 spec(chara_card_*) → CCv3；
+ * 3. 有 data 且 data.name 为字符串 → CCv3 包装；4. 顶层有 name：
+ *    含内部特征字段 → 内部单卡；否则含酒馆特征字段 → 酒馆卡；仅 name → 内部单卡（零回归）；
+ * 5. 都不满足 → unknown（交给 readJsonArrayFile 兜底）。
+ */
+export function detectCardJsonFormat(text: string): CardJsonFormat {
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return 'unknown'
+  }
+  if (Array.isArray(raw)) return 'array'
+  if (!raw || typeof raw !== 'object') return 'unknown'
+  const o = raw as Record<string, unknown>
+  // 1.5) 导出包 {characterCards|worldBooks:[...]} → 按数组导入
+  if (Array.isArray(o.characterCards) || Array.isArray(o.worldBooks)) return 'array'
+  // 2) 有 spec（chara_card_v2 / v3）
+  if (typeof o.spec === 'string' && o.spec.startsWith('chara_card_')) return 'ccv3'
+  // 3) 有 data 且 data.name 为字符串 → CCv3 包装
+  const data = o.data
+  if (data && typeof data === 'object' && typeof (data as Record<string, unknown>).name === 'string') return 'ccv3'
+  // 4) 顶层有 name
+  if (typeof o.name === 'string') {
+    if (INTERNAL_FEATURE_KEYS.some((k) => k in o)) return 'internal'
+    if (TAVERN_FEATURE_KEYS.some((k) => typeof o[k] === 'string' && (o[k] as string).length > 0)) return 'tavern'
+    return 'internal'
+  }
+  return 'unknown'
+}
+
+/** PNG 人物卡失败分级诊断分支（A 阶段） */
+export type PngDiagnoseBranch = 'no-chunk' | 'no-keyword' | 'json-error' | 'no-name' | 'ok'
+export interface PngDiagnoseResult {
+  branch: PngDiagnoseBranch
+  chunkCount?: number
+  error?: string
+}
+
+/**
+ * PNG 人物卡失败分级诊断：与 parseCharacterCardPng 共用同一判定顺序，
+ * 返回失败具体分支（no-chunk / no-keyword / json-error / no-name / ok），UI 按分支提示。
+ */
+export function diagnosePngCard(bytes: Uint8Array): PngDiagnoseResult {
+  const chunks = parsePngTextChunks(bytes)
+  if (chunks.length === 0) return { branch: 'no-chunk' }
+  const tryChunk = (chunk: { keyword: string; text: string } | undefined): PngDiagnoseResult | null => {
+    if (!chunk) return null
+    try {
+      let raw: unknown
+      if (chunk.keyword === 'chara') {
+        const b64 = chunk.text.trim()
+        raw = /^[A-Za-z0-9+/=]+$/.test(b64)
+          ? new TextDecoder('utf-8').decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+          : chunk.text
+      } else {
+        raw = chunk.text
+      }
+      const card = normalizeTavernCard(JSON.parse(raw as string))
+      if (!card) return { branch: 'no-name' }
+      return { branch: 'ok' }
+    } catch (e) {
+      return { branch: 'json-error', error: String((e as Error)?.message ?? e) }
+    }
+  }
+  const ccv3 = chunks.find((c) => c.keyword === 'ccv3')
+  const ccv3Res = tryChunk(ccv3)
+  if (ccv3Res) return ccv3Res
+  const chara = chunks.find((c) => c.keyword === 'chara')
+  const charaRes = tryChunk(chara)
+  if (charaRes) return charaRes
+  return { branch: 'no-keyword', chunkCount: chunks.length }
+}
+
 /**
  * 酒馆卡 → 本项目人物卡字段映射。
  * 返回 { fields, bookEntries }：
