@@ -141,8 +141,8 @@ export default function Sidebar() {
   // 这里监听屏幕左缘开始的横向右滑，越过阈值即打开侧边栏（打开后的左滑收回仍走官方 Drawer）。
   useEffect(() => {
     if (!isSmallScreen) return
-    const EDGE = 36
-    const THRESHOLD = 48
+    const EDGE = 44
+    const THRESHOLD = 40
     let tracking = false
     let startX = 0
     let startY = 0
