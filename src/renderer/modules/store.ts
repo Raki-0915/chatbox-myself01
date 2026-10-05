@@ -35,6 +35,8 @@ export const modBackupsAtom = atom<ModBackup[]>([])
 export const bookmarksAtom = atom<SessionBookmark[]>([])
 /** 群聊点名发言：本轮回合由哪个角色带头（一次性，prompt 注入时消费后清空） */
 export const groupSpotlightAtom = atom<string | null>(null)
+/** 群聊发言身份（普通 / 扮演某角色 / 系统事件）——全局共享，消息流长按角色名可切换 */
+export const groupIdentityAtom = atom<{ kind: 'role' | 'system' | 'char'; charName?: string }>({ kind: 'role' })
 
 /** 是否已从存储加载过（避免并发重复加载） */
 let loaded = false

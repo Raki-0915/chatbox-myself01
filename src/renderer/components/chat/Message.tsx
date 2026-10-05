@@ -45,14 +45,14 @@ import {
 } from '@tabler/icons-react'
 import clsx from 'clsx'
 import * as dateFns from 'date-fns'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import type React from 'react'
 import { type FC, forwardRef, type MouseEventHandler, memo, useCallback, useMemo, useRef, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { trackAgentModeSuggestionAction } from '@/analytics/agent-mode'
 import { trackJkClickEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import { characterCardsAtom, modSettingsAtom } from '@/modules/store'
+import { characterCardsAtom, groupIdentityAtom, modSettingsAtom } from '@/modules/store'
 import { requestGroupSpotlightGenerate } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import Markdown from '@/components/Markdown'
@@ -244,11 +244,36 @@ const _Message: FC<Props> = (props) => {
     return groupAllCards.find((c) => c.name === msg.name)?.avatar
   }, [msg.name, groupAllCards])
 
-  // Chatbox Mod：点击角色名/头像 → 点名该角色带头发言（仅群聊模式）
+  // Chatbox Mod：群聊角色名/头像交互（仅群聊模式）
+  // 短按 → 点名该角色带头自动发言；长按（>600ms）→ 切换扮演该角色
   const groupModChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
-  const handleRoleSpotlightClick = (name: string | undefined) => {
+  const [, setGroupIdentity] = useAtom(groupIdentityAtom)
+  const groupPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const groupLongPressFired = useRef(false)
+  const handleRolePressStart = (name: string | undefined) => {
+    if (groupModChatMode !== 'group' || !name) return
+    groupLongPressFired.current = false
+    groupPressTimer.current = setTimeout(() => {
+      groupLongPressFired.current = true
+      setGroupIdentity({ kind: 'char', charName: name })
+    }, 600)
+  }
+  const handleRolePressEnd = (name: string | undefined) => {
+    if (groupPressTimer.current) {
+      clearTimeout(groupPressTimer.current)
+      groupPressTimer.current = null
+    }
+    if (groupLongPressFired.current) return
+    // 短按：点名该角色带头自动发言
     if (groupModChatMode !== 'group' || !name) return
     requestGroupSpotlightGenerate(sessionId, name)
+  }
+  const handleRolePressCancel = () => {
+    if (groupPressTimer.current) {
+      clearTimeout(groupPressTimer.current)
+      groupPressTimer.current = null
+    }
+    groupLongPressFired.current = false
   }
 
   const needCollapse =
@@ -1422,15 +1447,22 @@ const _Message: FC<Props> = (props) => {
               isSmallScreen ? (shouldShowAvatar ? 'max-w-[calc(100%-3rem)]' : 'max-w-[95%]') : 'max-w-[85%]'
             )}
           >
-            {/* Chatbox Mod：群聊用户扮演角色 → 气泡上方显示角色名 + 角色头像（点击=点名该角色带头发言） */}
+            {/* Chatbox Mod：群聊用户扮演角色 → 气泡上方显示角色名 + 角色头像（短按=点名，长按=切扮演） */}
             {msg.name && msg.name !== '系统' && (
               <Flex
                 align="center"
                 gap={4}
-                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer')}
+                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer touch-none')}
                 justify="flex-end"
-                title={groupModChatMode === 'group' ? `点击让${msg.name}带头发言` : undefined}
-                onClick={() => handleRoleSpotlightClick(msg.name)}
+                title={
+                  groupModChatMode === 'group'
+                    ? `短按：让${msg.name}带头发言；长按：切换扮演${msg.name}`
+                    : undefined
+                }
+                onPointerDown={() => handleRolePressStart(msg.name)}
+                onPointerUp={() => handleRolePressEnd(msg.name)}
+                onPointerLeave={handleRolePressCancel}
+                onPointerCancel={handleRolePressCancel}
               >
                 {groupRoleAvatar && (
                   <Box
@@ -1518,14 +1550,21 @@ const _Message: FC<Props> = (props) => {
             </Box>
           )}
           <Flex direction="column" align="flex-start" className="min-w-0 flex-1 max-w-full">
-            {/* Chatbox Mod：群聊角色名 + 角色头像（点击=点名该角色带头发言） */}
+            {/* Chatbox Mod：群聊角色名 + 角色头像（短按=点名发言，长按=切换扮演） */}
             {isBubbleLayout && msg.role === 'assistant' && msg.name && msg.name !== '系统' && (
               <Flex
                 align="center"
                 gap={4}
-                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer')}
-                title={groupModChatMode === 'group' ? `点击让${msg.name}带头发言` : undefined}
-                onClick={() => handleRoleSpotlightClick(msg.name)}
+                className={cn('mb-0.5 select-none', groupModChatMode === 'group' && 'cursor-pointer touch-none')}
+                title={
+                  groupModChatMode === 'group'
+                    ? `短按：让${msg.name}带头发言；长按：切换扮演${msg.name}`
+                    : undefined
+                }
+                onPointerDown={() => handleRolePressStart(msg.name)}
+                onPointerUp={() => handleRolePressEnd(msg.name)}
+                onPointerLeave={handleRolePressCancel}
+                onPointerCancel={handleRolePressCancel}
               >
                 {groupRoleAvatar && (
                   <Box

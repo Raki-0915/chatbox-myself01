@@ -55,7 +55,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useStore } from 'zustand'
 import { JK_PAGE_NAMES } from '@/analytics/jk-events'
 import { modSettingsAtom } from '@/modules/store'
-import { characterCardsAtom } from '@/modules/store'
+import { characterCardsAtom, groupIdentityAtom } from '@/modules/store'
 import { scheduleGroupAutoPlay, requestGroupSpotlightGenerate } from '@/modules/group-autoplay'
 import { rendererApplication } from '@/app/renderer-application'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -270,10 +270,8 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
     const messageInputFieldRef = useRef<MessageInputFieldRef>(null)
     const latestInputRef = useRef('')
     const [hasTextContent, setHasTextContent] = useState(false)
-    // Chatbox Mod：群聊发言身份（普通角色 / 扮演某角色 / 系统事件）
-    const [groupIdentity, setGroupIdentity] = useState<{ kind: 'role' | 'system' | 'char'; charName?: string }>({
-      kind: 'role',
-    })
+    // Chatbox Mod：群聊发言身份（普通角色 / 扮演某角色 / 系统事件）——全局原子，消息流长按角色名也可切换
+    const [groupIdentity, setGroupIdentity] = useAtom(groupIdentityAtom)
     const [groupPickerOpen, setGroupPickerOpen] = useState(false)
     const modChatMode = useAtomValue(modSettingsAtom).chatMode ?? 'creation'
     const groupRoleCards = useAtomValue(characterCardsAtom)
