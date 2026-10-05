@@ -1720,46 +1720,55 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
               </Tooltip>
             </Flex>
 
-            {/* Mod：全屏输入编辑器覆盖层 */}
+            {/* Mod：全屏输入编辑器覆盖层（半屏面板：点击非输入区缩回） */}
             {fullscreenOpen &&
               createPortal(
-                <Box className="z-[500] fixed inset-0 flex flex-col bg-chatbox-background-primary text-chatbox-tint-primary">
-                  <Flex align="center" justify="space-between" px="md" py={8} className="border-b border-solid border-chatbox-border-primary shrink-0">
-                    <Text size="sm" fw={600}>{t('Fullscreen input') || '全屏输入'}</Text>
-                    <ActionIcon variant="subtle" color="gray" size="lg" onClick={closeFullscreen} aria-label={t('Close') || '关闭'}>
-                      <IconX size={20} />
-                    </ActionIcon>
-                  </Flex>
-                  <Textarea
-                    unstyled
-                    autoFocus
-                    data-testid="mod-fullscreen-input"
-                    placeholder={t('Type your question here...') || ''}
-                    value={fullscreenValue}
-                    onChange={(e) => setFullscreenValue(e.currentTarget.value)}
-                    onKeyDown={onFullscreenKeyDown}
-                    classNames={{
-                      root: 'flex-1 min-h-0',
-                      wrapper: 'flex-1 min-h-0',
-                      input: 'w-full h-full outline-none border-none resize-none px-4 py-3 bg-transparent leading-7',
-                    }}
-                    styles={{ input: { fontSize: 15 } }}
-                  />
-                  <Flex align="center" justify="space-between" px="md" py={10} className="border-t border-solid border-chatbox-border-primary shrink-0">
-                    <Text size="xs" c="dimmed">
-                      {t('Enter to send · Shift+Enter for newline · Esc to close') || 'Enter 发送 · Shift+Enter 换行 · Esc 关闭'}
-                    </Text>
-                    <Button
-                      size="md"
-                      radius="lg"
-                      color="chatbox-brand"
-                      disabled={!fullscreenValue.trim()}
-                      onClick={fullscreenSend}
-                      leftSection={<ScalableIcon icon={IconArrowUp} size={16} />}
-                    >
-                      {t('Send') || '发送'}
-                    </Button>
-                  </Flex>
+                <Box className="z-[500] fixed inset-0" onClick={closeFullscreen}>
+                  {/* 遮罩：点击非输入区缩回 */}
+                  <Box className="absolute inset-0 bg-black/25" />
+                  {/* 半屏面板：底部对齐，占一半高度 */}
+                  <Box
+                    className="absolute bottom-0 inset-x-0 flex flex-col rounded-t-2xl bg-chatbox-background-primary text-chatbox-tint-primary shadow-2xl"
+                    style={{ height: '50dvh' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Flex align="center" justify="space-between" px="md" py={8} className="border-b border-solid border-chatbox-border-primary shrink-0">
+                      <Text size="sm" fw={600}>{t('Fullscreen input') || '全屏输入'}</Text>
+                      <ActionIcon variant="subtle" color="gray" size="lg" onClick={closeFullscreen} aria-label={t('Close') || '关闭'}>
+                        <IconX size={20} />
+                      </ActionIcon>
+                    </Flex>
+                    <Textarea
+                      unstyled
+                      autoFocus
+                      data-testid="mod-fullscreen-input"
+                      placeholder={t('Type your question here...') || ''}
+                      value={fullscreenValue}
+                      onChange={(e) => setFullscreenValue(e.currentTarget.value)}
+                      onKeyDown={onFullscreenKeyDown}
+                      classNames={{
+                        root: 'flex-1 min-h-0',
+                        wrapper: 'flex-1 min-h-0',
+                        input: 'w-full h-full outline-none border-none resize-none px-4 py-3 bg-transparent leading-7',
+                      }}
+                      styles={{ input: { fontSize: 15 } }}
+                    />
+                    <Flex align="center" justify="space-between" px="md" py={10} className="border-t border-solid border-chatbox-border-primary shrink-0">
+                      <Text size="xs" c="dimmed">
+                        {t('Enter to send · Shift+Enter for newline · Tap outside to close') || 'Enter 发送 · Shift+Enter 换行 · 点击面板外关闭'}
+                      </Text>
+                      <Button
+                        size="md"
+                        radius="lg"
+                        color="chatbox-brand"
+                        disabled={!fullscreenValue.trim()}
+                        onClick={fullscreenSend}
+                        leftSection={<ScalableIcon icon={IconArrowUp} size={16} />}
+                      >
+                        {t('Send') || '发送'}
+                      </Button>
+                    </Flex>
+                  </Box>
                 </Box>,
                 document.body
               )}
