@@ -533,6 +533,9 @@ export function WorldBooksTab() {
           ) : (
             <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
           )}
+          {!bs.mode && (
+            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.setMany(filtered.map((w) => w.id)) }}>全选</Button>
+          )}
           {!bs.mode && <Button size="xs" onClick={openNew}>+ 新建世界书</Button>}
         </Group>
       </Group>
@@ -921,6 +924,9 @@ export function CharactersTab() {
             <Button size="xs" variant="filled" color="green" onClick={() => { bs.setMode(false); bs.clear() }}>完成</Button>
           ) : (
             <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.clear() }}>多选</Button>
+          )}
+          {!bs.mode && (
+            <Button size="xs" variant="default" onClick={() => { bs.setMode(true); bs.setMany(filtered.map((c) => c.id)) }}>全选</Button>
           )}
           {!bs.mode && (
             <Button size="xs" variant="default" leftSection={<IconGitMerge size={14} />} onClick={() => { setPresetMerge(null); openMerge() }}>合并同名</Button>
