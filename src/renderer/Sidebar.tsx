@@ -137,6 +137,47 @@ export default function Sidebar() {
     }
   }, [isSmallScreen, showSidebar])
 
+  // Chatbox Mod：自定义边缘滑出手势兜底——官方 SwipeableDrawer 在安卓 WebView 里手势不稳，
+  // 这里监听屏幕左缘开始的横向右滑，越过阈值即打开侧边栏（打开后的左滑收回仍走官方 Drawer）。
+  useEffect(() => {
+    if (!isSmallScreen) return
+    const EDGE = 36
+    const THRESHOLD = 48
+    let tracking = false
+    let startX = 0
+    let startY = 0
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t.clientX <= EDGE) {
+        tracking = true
+        startX = t.clientX
+        startY = t.clientY
+      }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking) return
+      const t = e.touches[0]
+      const dx = t.clientX - startX
+      const dy = t.clientY - startY
+      // 向右滑、横向占主导、越过阈值 → 拉出侧边栏
+      if (dx > THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        tracking = false
+        setShowSidebar(true)
+      }
+    }
+    const onTouchEnd = () => {
+      tracking = false
+    }
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('touchend', onTouchEnd, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [isSmallScreen, setShowSidebar])
+
   return (
     <SwipeableDrawer
       anchor={language === 'ar' ? 'right' : 'left'}
