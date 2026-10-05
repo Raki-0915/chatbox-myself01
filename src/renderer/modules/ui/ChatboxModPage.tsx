@@ -1490,6 +1490,17 @@ function BindingTab() {
     const next = cur.characterCardIds.includes(id) ? cur.characterCardIds.filter((x) => x !== id) : [...cur.characterCardIds, id]
     await setBinding(sessionId, { ...cur, characterCardIds: next })
   }
+  // Mod：一键全选装载（世界书 / 人物卡）
+  const loadAllWb = async () => {
+    if (!sessionId || sessionId === 'new') return
+    const cur = await getBinding(sessionId)
+    await setBinding(sessionId, { ...cur, worldBookIds: worldBooks.map((w) => w.id) })
+  }
+  const loadAllCc = async () => {
+    if (!sessionId || sessionId === 'new') return
+    const cur = await getBinding(sessionId)
+    await setBinding(sessionId, { ...cur, characterCardIds: characters.map((c) => c.id) })
+  }
 
   return (
     <Stack gap="md">
@@ -1498,6 +1509,8 @@ function BindingTab() {
       </Alert>
       {sessionId && sessionId !== 'new' && (
         <Group>
+          <Button size="xs" variant="default" leftSection={<IconCircleCheck size={14} />} onClick={() => void loadAllWb()}>全选世界书</Button>
+          <Button size="xs" variant="default" leftSection={<IconCircleCheck size={14} />} onClick={() => void loadAllCc()}>全选人物卡</Button>
           <Button size="xs" variant="default" onClick={() => void clearBinding(sessionId)}>清空装载</Button>
         </Group>
       )}
