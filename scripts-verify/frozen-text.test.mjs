@@ -69,6 +69,44 @@ function check(name, cond) {
   check('保护:未冻结部分照常', r.indexOf('四公主洛曦的宫殿很气派') !== -1)
 }
 
+// 7b. applyFrozenProtection（v2 增强）：AI 微调改写冻结段 → 原位还原，不再残留改写版
+{
+  const frozen = [{ field: 'backgroundStory', text: '四公主帝洛曦的宫殿内有偏殿用于议事' }]
+  const aiNew = '东周女帝帝释天。四公主帝洛曦的宫殿内偏殿用于议事。新增设定。'
+  const r = applyFrozenProtection(aiNew, frozen, 'backgroundStory')
+  check('保护v2:被改写残留不再留在原位', r.indexOf('四公主帝洛曦的宫殿内偏殿用于议事') === -1)
+  check('保护v2:原文还原且不重复', r.split('四公主帝洛曦的宫殿内有偏殿用于议事').length - 1 === 1)
+  check('保护v2:未冻结部分照常', r.indexOf('新增设定') !== -1)
+}
+
+// 7c. applyFrozenProtection（v2 增强）：AI 只改了一个字 → 整行原位还原
+{
+  const frozen = [{ field: 'backgroundStory', text: '罗素船长年轻时曾横渡大西洋' }]
+  const aiNew = '罗素副船长年轻时曾横渡大西洋。他喜欢航海。'
+  const r = applyFrozenProtection(aiNew, frozen, 'backgroundStory')
+  check('保护v2:改一字原位还原', r.indexOf('罗素船长年轻时曾横渡大西洋') !== -1)
+  check('保护v2:改字残留已清除', r.indexOf('罗素副船长') === -1)
+  check('保护v2:他喜欢航海保留', r.indexOf('他喜欢航海') !== -1)
+}
+
+// 7d. applyFrozenProtection（v2 增强）：多行冻结段被改写 → 跨行窗口整块还原
+{
+  const frozen = [{ field: 'backgroundStory', text: '她来自北境雪原。\n十岁那年独自踏上了征途。' }]
+  const aiNew = '她来自南境荒漠。\n十岁那年独自踏上了征途。'
+  const r = applyFrozenProtection(aiNew, frozen, 'backgroundStory')
+  check('保护v2:多行冻结段整块还原', r.indexOf('她来自北境雪原。\n十岁那年独自踏上了征途。') !== -1)
+  check('保护v2:多行改写残留清除', r.indexOf('南境荒漠') === -1)
+}
+
+// 7e. applyFrozenProtection（v2 增强）：仅空白/换行差异 → 视为保留，不补回不替换
+{
+  const frozen = [{ field: 'content', text: '帝洛曦的宫殿位于西宫，殿内有偏殿。' }]
+  const aiNew = '帝洛曦的宫殿位于西宫，殿内有偏殿。\n新剧情推进。'
+  const r = applyFrozenProtection(aiNew, frozen, 'content')
+  check('保护v2:空白差异视为保留(无重复)', r.split('帝洛曦的宫殿位于西宫').length - 1 === 1)
+  check('保护v2:新剧情保留', r.indexOf('新剧情推进') !== -1)
+}
+
 // 8. applyFrozenProtection：多个冻结段，仅回填缺失的
 {
   const frozen = [{ field: 'backgroundStory', text: '冻结甲' }, { field: 'backgroundStory', text: '冻结乙' }]
