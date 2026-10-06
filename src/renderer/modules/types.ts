@@ -45,6 +45,8 @@ export interface AssociatedEvent {
   keywords: string[]
   /** 发生时间（ms） */
   t: number
+  /** 事件发生的原章节号（原著域「原作续改」注入筛选锚：只注入 chapter ≤ 当前节点关联章号的事件，未来事件不注入防剧透） */
+  chapter?: number
   /** 单条冻结：true = 锁死，自动更新不得改写/删除 */
   frozen?: boolean
 }
@@ -163,3 +165,89 @@ export interface SessionBookmark {
   /** 消息内容简短预览 */
   preview: string
 }
+
+/* ======================== 原著域（原作续改）类型 ======================== */
+/** 原著域与聊天域双域隔离：原著域只被「原作续改」改写页读取（bookId 命名空间、只读） */
+
+/** 章节预告条目（原剧情预告 / 改写剧情预告通用：章号 + 标题 + 剧情梗概） */
+export interface NovelPreviewItem {
+  /** 章号（原著用数字 ch；改写线用 '改N'） */
+  ch: number | string
+  title: string
+  brief: string
+}
+
+/** 原著章节节点（每章一条，只读） */
+export interface NovelChapter {
+  id: string
+  bookId: string
+  /** 原章节号（注入筛选的锚） */
+  chIndex: number
+  title: string
+  /** 原文全文（只读，导入后锁定） */
+  original: string
+  /** 本章概要（1~2 句） */
+  summary: string
+  /** 原剧情预告：后续 N 章（条目可点击 → 跳转对应章节原文） */
+  originalPreview: NovelPreviewItem[]
+}
+
+/** 人物卡静态基线（全书一致 · 只放不变设定；随剧情变化的进演化事件） */
+export interface NovelCharacterBaseline {
+  id: string
+  bookId: string
+  name: string
+  backgroundStory: string
+  keywords: string[]
+  enabled: boolean
+}
+
+/** 角色演化事件（动态 · 按章累积；chapter 为注入筛选锚） */
+export interface NovelEvent extends AssociatedEvent {
+  bookId: string
+}
+
+/** 世界书条目（世界观 / 主线 / 伏笔，来源标注原著分析） */
+export interface NovelWorldEntry extends WorldBookEntry {
+  bookId: string
+}
+
+/** 改写线节点（可写 · 用户产物；引用原章节 ID，不复制原文） */
+export interface NovelRewriteNode {
+  id: string
+  bookId: string
+  /** 引用原著章节 ID（对照时按 ID 取原文，不复制） */
+  refChapterId: string
+  /** 关联原章号（注入筛选锚；改5-3 → 5） */
+  chapter: number
+  /** 节点标题（如 '5-3 改写版'） */
+  title: string
+  /** 改写版全文 */
+  revised: string
+  /** 剧情锚点：本章结束时剧情状态一句话（定位靠它，不靠章节号） */
+  anchor: string
+  /** 改写剧情预告：AI 推导，可手动编辑，推进时强约束注入 */
+  revisedPreview: NovelPreviewItem[]
+  /** draft / finalized */
+  status: 'draft' | 'finalized'
+  updatedAt: number
+}
+
+/** 原著库整体（bookId 命名空间根对象） */
+export interface NovelBook {
+  bookId: string
+  bookName: string
+  generatedFor: string
+  /** 改写起点章节（默认第 1 章） */
+  startChapter: number
+  /** 预告章数（1~6，默认 3） */
+  previewCount: number
+  chapters: NovelChapter[]
+  characterBaselines: NovelCharacterBaseline[]
+  evolutionEvents: NovelEvent[]
+  worldbook: NovelWorldEntry[]
+  rewriteNodes: NovelRewriteNode[]
+  /** 导入时间戳 */
+  importedAt: number
+}
+

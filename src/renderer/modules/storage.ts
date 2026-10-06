@@ -18,6 +18,8 @@ export const MOD_STORAGE_KEYS = {
   log: 'mod.log',
   settings: 'mod.settings',
   bookmarks: 'mod.bookmarks',
+  /** 原著域（原作续改）：bookId 命名空间，与聊天域隔离 */
+  novelBooks: 'mod.novel-books',
 } as const
 
 export type ModStorageKey = (typeof MOD_STORAGE_KEYS)[keyof typeof MOD_STORAGE_KEYS]
