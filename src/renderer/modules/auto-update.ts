@@ -351,8 +351,28 @@ export async function maybeAutoUpdateWorldBooks(
       const name = str(item.name)
       if (!name) continue
       const existing = ccByName.get(name)
+      // [Chatbox Mod] 修复「冻结段所在字段被自动更新清空/冻结段丢失」：
+      // 同名人物卡已存在时（模型把更新误判为「新增」），按更新处理 —— 保留原卡全部字段
+      // （含 frozenTexts、显著特征/优点/缺点/爱好/身高/体重），只应用 AI 明确返回的字段，
+      // 并对可冻结字段逐一做冻结段保护，避免重建卡片把未返回字段写成空白。
+      if (existing) {
+        const merged: CharacterCard = {
+          ...existing,
+          age: str(item.age) || existing.age,
+          gender: str(item.gender) || existing.gender,
+          occupation: str(item.occupation) || existing.occupation,
+          appearance: applyFrozenProtection(str(item.appearance) || existing.appearance, existing.frozenTexts, 'appearance'),
+          personalityType: applyFrozenProtection(str(item.personalityType) || existing.personalityType, existing.frozenTexts, 'personalityType'),
+          backgroundStory: applyFrozenProtection(str(item.backgroundStory) || existing.backgroundStory, existing.frozenTexts, 'backgroundStory'),
+          updatedAt: Date.now(),
+        }
+        await addOrUpdateCharacterCard(merged)
+        ccByName.set(name, merged)
+        result.ccUpdate++
+        continue
+      }
       const card: CharacterCard = {
-        id: existing?.id ?? uuidv4(),
+        id: uuidv4(),
         name,
         age: str(item.age),
         gender: str(item.gender),
@@ -374,17 +394,14 @@ export async function maybeAutoUpdateWorldBooks(
         customAttributes: [],
         characterBook: [],
         enabled: true,
-        createdAt: existing?.createdAt ?? Date.now(),
+        createdAt: Date.now(),
         updatedAt: Date.now(),
-        versionHistory: existing?.versionHistory ?? [],
+        versionHistory: [],
       }
       await addOrUpdateCharacterCard(card)
       ccByName.set(name, card)
-      if (existing) result.ccUpdate++
-      else {
-        result.ccAdd++
-        binding.characterCardIds = [...new Set([...binding.characterCardIds, card.id])]
-      }
+      result.ccAdd++
+      binding.characterCardIds = [...new Set([...binding.characterCardIds, card.id])]
     }
     for (const item of diff.cc.update) {
       const name = str(item.name)
