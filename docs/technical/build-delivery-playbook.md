@@ -67,6 +67,13 @@
 **修复**：重打包时剔除基底 `assets/public/*` 与历史残留 `public/*`，新产物写入 `assets/public/`；交付前用 `unzip -p <apk> assets/public/js/index.*.js | grep <新功能特征串>` 验证。
 **教训**：**APK 内路径必须跟 WebView 实际加载路径（assets/ 前缀）一致**；交付验证不能只验"新代码在不在"，要验"新代码在不在 WebView 加载的路径"。
 
+### 4c. 强制中文逻辑未延续（V17 · 界面变英文）
+
+**现象**：用户覆盖安装 V17 后设置页全英文（官方项英文、我们硬编码的中文项不变），用户强烈不满（"有没有说过我不要英文"）。
+**根因**：早期项目（2026-09-17 XM02 记录）明确要求「语言模块强制 zh-Hans」；迁移到官方 TS 源码 fork 时该强制逻辑丢失，`bootstrapRenderer.ts` 改为 `i18n.changeLanguage(settings.language)` 跟随持久化设置——设置/系统语言为英文时界面即英文。硬编码中文项不受影响，恰好成为判断依据（官方项英文 + 自定义项中文 = i18n 语言丢了）。
+**修复**：`bootstrapRenderer.ts` 强制 `void i18n.changeLanguage('zh-Hans')`（不跟随 settings.language）；偏好固化「界面语言必须简体中文，不接受英文」。
+**教训**：**用户早期明确的产品级约束必须随仓库迁移延续**，接手时先核对「历史硬约束清单」；涉及语言/设置初始化的改动不得悄悄回退强制逻辑。
+
 ### 5. NO_MINIFY 的交付副作用
 
 **现象**：为降沙箱负载关闭 JS 压缩，主 bundle 15.3MB，APK 体积 24.7MB→46MB。
