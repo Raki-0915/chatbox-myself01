@@ -6,10 +6,9 @@
  */
 import { getDefaultStore } from 'jotai'
 import { similarityRatio, SIMILARITY_TRIVIAL } from './text-similarity'
-import { applyFrozenProtection } from './frozen-text'
+import { applyFrozenLock, hasFrozenOnField } from './frozen-text'
 import { runConfirmGate } from './confirm-gate'
 import { applyRemoveGuard, appendEvents } from './event-split'
-import { dedupDiffEvents, canMerge, mergeEvent, DEFAULT_EVENT_SENSITIVITY } from './event-dedup'
 
 export { similarityRatio, SIMILARITY_TRIVIAL }
 
@@ -169,12 +168,8 @@ export interface AutoUpdateResult {
   ccAdd: number
   ccUpdate: number
   ccRemove: number
-  /** 关联事件追加条数（剧情进展 → 角色事件区 append） */
+  /** 关联事件追加条数（剧情进展 → 角色事件区 append，全量追加） */
   eventsAdd: number
-  /** 关联事件重复跳过条数（自动判重，预览可展开/恢复） */
-  eventsSkip: number
-  /** 关联事件合并条数（疑似重复 → 聚合进原条目） */
-  eventsMerge: number
 }
 
 /** 更新预览：模型算出的差异，交给 UI 弹窗展示并让用户确认 */
@@ -192,11 +187,11 @@ export async function maybeAutoUpdateWorldBooks(
   opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null> } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
-  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0, eventsSkip: 0, eventsMerge: 0 }
+  if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
   if (opts.force) updating = false
   updating = true
 
-  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0, eventsSkip: 0, eventsMerge: 0 }
+  const result: AutoUpdateResult = { ok: false, wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
   try {
     const store = getDefaultStore()
     const settings = store.get(modSettingsAtom)
@@ -259,14 +254,8 @@ export async function maybeAutoUpdateWorldBooks(
       }
     )
 
-    // 事件去重分流（方案书：任务方案书_角色知识库事件去重合并）：每次追加前自动判重，
-    // 重复 → 跳过（可预览/恢复）；疑似 → 进预览人工定夺（自动模式保守跳过）；新增 → 正常追加
-    diff = dedupDiffEvents(
-      diff,
-      ccByName as Map<string, { associatedEvents?: Array<{ id: string; content: string; keywords?: string[]; frozen?: boolean }> }>,
-      settings.eventDedupSensitivity ?? DEFAULT_EVENT_SENSITIVITY,
-      settings.requireConfirm
-    )
+    // v2.2：无自动判重——分析出的事件全部直接追加（方案书：任务方案书_角色知识库事件去重合并，3.1）
+    // 重复整理完全交给人物卡编辑页的「手动合并」
 
     // 人工确认（可配置）：优先展示「更新预览」供用户逐条勾选（返回勾选后的差异）
     // 确认门保证：要求确认时，弹窗缺失/异常 → 中止，绝不静默写回
@@ -333,7 +322,7 @@ export async function maybeAutoUpdateWorldBooks(
       if (!existing) continue
       await addOrUpdateWorldBook({
         ...existing,
-        content: applyFrozenProtection(str(item.content) || existing.content, existing.frozenTexts, 'content'),
+        content: applyFrozenLock(str(item.content) || existing.content, existing.content, existing.frozenTexts, 'content'),
         keywords: Array.isArray(item.keywords) && item.keywords.length ? item.keywords.map((k) => String(k)) : existing.keywords,
       })
       result.wbUpdate++
@@ -347,32 +336,49 @@ export async function maybeAutoUpdateWorldBooks(
     }
 
     // 人物卡：新增/更新（按名称匹配）
+    // 字段级合并（v4，修复「AI 输出缺字段 → 非冻结字段被空串清空」）：
+    // - 该字段存在冻结段 → 永远保持旧值（AI 不能改也不能追加）
+    // - 无冻结段且 AI 给的是非空值 → 用 AI 值
+    // - 无冻结段但 AI 未输出该字段（空串）→ 保留旧值，绝不清空
+    const mergeCardField = (existing: CharacterCard, frozen: Array<{ field: string; text: string } | string>, field: string, aiValue: unknown): string => {
+      if (hasFrozenOnField(frozen, field)) return String((existing as unknown as Record<string, unknown>)?.[field] ?? '')
+      const v = String(aiValue ?? '').trim()
+      return v ? v : String((existing as unknown as Record<string, unknown>)?.[field] ?? '')
+    }
     for (const item of diff.cc.add) {
       const name = str(item.name)
       if (!name) continue
       const existing = ccByName.get(name)
+      // 同名卡已存在时的字段级硬锁：该卡已有冻结段 → 冻结字段保持旧值（AI 不能改也不能追加）
+      const frozen = existing?.frozenTexts ?? []
+      const merge = (field: string, aiValue: unknown) =>
+        existing ? mergeCardField(existing, frozen, field, aiValue) : str(aiValue)
       const card: CharacterCard = {
         id: existing?.id ?? uuidv4(),
         name,
-        age: str(item.age),
-        gender: str(item.gender),
-        occupation: str(item.occupation),
-        appearance: str(item.appearance),
-        height: '',
-        weight: '',
-        distinguishingFeatures: '',
-        personalityType: str(item.personalityType),
-        strengths: '',
-        weaknesses: '',
-        hobbies: '',
-        backgroundStory: str(item.backgroundStory),
-        relationships: Array.isArray(item.relationships)
-          ? item.relationships
-              .filter((x) => x && typeof x === 'object' && str((x as Record<string, unknown>).targetName))
-              .map((x) => ({ targetName: str((x as Record<string, unknown>).targetName), relation: str((x as Record<string, unknown>).relation), description: '' }))
-          : [],
-        customAttributes: [],
-        characterBook: [],
+        age: merge('age', item.age),
+        gender: merge('gender', item.gender),
+        occupation: merge('occupation', item.occupation),
+        appearance: merge('appearance', item.appearance),
+        height: merge('height', item.height),
+        weight: merge('weight', item.weight),
+        distinguishingFeatures: merge('distinguishingFeatures', item.distinguishingFeatures),
+        personalityType: merge('personalityType', item.personalityType),
+        strengths: merge('strengths', item.strengths),
+        weaknesses: merge('weaknesses', item.weaknesses),
+        hobbies: merge('hobbies', item.hobbies),
+        backgroundStory: merge('backgroundStory', item.backgroundStory),
+        relationships:
+          existing && !(Array.isArray(item.relationships) && item.relationships.length)
+            ? existing.relationships
+            : Array.isArray(item.relationships)
+              ? item.relationships
+                  .filter((x) => x && typeof x === 'object' && str((x as Record<string, unknown>).targetName))
+                  .map((x) => ({ targetName: str((x as Record<string, unknown>).targetName), relation: str((x as Record<string, unknown>).relation), description: '' }))
+              : existing?.relationships ?? [],
+        customAttributes: existing?.customAttributes ?? [],
+        characterBook: existing?.characterBook ?? [],
+        frozenTexts: frozen,
         enabled: true,
         createdAt: existing?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
@@ -390,9 +396,22 @@ export async function maybeAutoUpdateWorldBooks(
       const name = str(item.name)
       const existing = ccByName.get(name)
       if (!existing) continue
+      const frozen = existing.frozenTexts ?? []
+      const merge = (field: string, aiValue: unknown) => mergeCardField(existing, frozen, field, aiValue)
       await addOrUpdateCharacterCard({
         ...existing,
-        backgroundStory: applyFrozenProtection(str(item.backgroundStory) || existing.backgroundStory, existing.frozenTexts, 'backgroundStory'),
+        age: merge('age', item.age),
+        gender: merge('gender', item.gender),
+        occupation: merge('occupation', item.occupation),
+        appearance: merge('appearance', item.appearance),
+        height: merge('height', item.height),
+        weight: merge('weight', item.weight),
+        distinguishingFeatures: merge('distinguishingFeatures', item.distinguishingFeatures),
+        personalityType: merge('personalityType', item.personalityType),
+        strengths: merge('strengths', item.strengths),
+        weaknesses: merge('weaknesses', item.weaknesses),
+        hobbies: merge('hobbies', item.hobbies),
+        backgroundStory: merge('backgroundStory', item.backgroundStory),
         relationships: Array.isArray(item.relationships) && item.relationships.length ? existing.relationships : existing.relationships,
         updatedAt: Date.now(),
       })
@@ -406,9 +425,8 @@ export async function maybeAutoUpdateWorldBooks(
       result.ccRemove++
     }
 
-    // 关联事件追加（背景/事件分流 + 去重合并）：剧情进展 → 对应角色事件区末尾。
-    // 按角色聚合后统一写回（避免同卡多事件相互覆盖）；_dedup.action==='merge' 的
-    // 项合并进目标事件（只增不覆盖，触发词去重）；其余正常追加
+    // 关联事件追加（v2.2 全量追加，无判重合并）：剧情进展 → 对应角色事件区末尾。
+    // 按角色聚合后统一写回（避免同卡多事件相互覆盖）
     const eventsAppend = diff.events?.append ?? []
     const eventsByRole = new Map<string, Array<Record<string, unknown>>>()
     for (const item of eventsAppend) {
@@ -425,28 +443,11 @@ export async function maybeAutoUpdateWorldBooks(
       if (!card) continue
       let local: CharacterCard = card
       for (const item of items) {
-        const dd = (item._dedup ?? null) as { score?: number; targetId?: string; action?: 'merge' } | null
-        if (dd && typeof dd === 'object' && dd.action === 'merge') {
-          const targetId = String(dd.targetId ?? '')
-          const target = (local.associatedEvents ?? []).find((e) => e.id === targetId)
-          // 冻结/超限目标不可合并 → 降级为仍新增（方案书 3.3）
-          if (target && canMerge(target)) {
-            local = {
-              ...local,
-              associatedEvents: (local.associatedEvents ?? []).map((e) =>
-                e.id === targetId ? mergeEvent(target, item) : e
-              ),
-            }
-            result.eventsMerge++
-            continue
-          }
-        }
         local = appendEvents(local, [item])
         result.eventsAdd++
       }
       await addOrUpdateCharacterCard(local)
     }
-    result.eventsSkip += diff.events?.skip?.length ?? 0
 
     // 装载变化写回会话
     if (binding.worldBookIds.length > 0 || binding.characterCardIds.length > 0) {

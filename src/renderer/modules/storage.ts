@@ -18,6 +18,7 @@ export const MOD_STORAGE_KEYS = {
   log: 'mod.log',
   settings: 'mod.settings',
   bookmarks: 'mod.bookmarks',
+  novelBooks: 'mod.novel-books',
 } as const
 
 export type ModStorageKey = (typeof MOD_STORAGE_KEYS)[keyof typeof MOD_STORAGE_KEYS]

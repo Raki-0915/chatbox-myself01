@@ -91,20 +91,103 @@ export interface ModFolder {
   kind: 'wb' | 'cc'
 }
 
+/* ======================== 原作续改（原著域） ======================== */
+
+/** 原著章节节点（原著库，只读） */
+export interface NovelChapter {
+  id: string
+  bookId: string
+  /** 原章节号（注入筛选锚） */
+  chIndex: number
+  title: string
+  /** 原文全文（导入后锁定） */
+  original: string
+  /** 本章概要（1~2 句） */
+  summary: string
+  /** 原剧情预告（后续 N 章：章号+标题+剧情梗概；条目可点击 → 跳转对应章节） */
+  originalPreview: Array<{ ch: number; title: string; brief: string }>
+}
+
+/** 人物卡基线（静态 · 全书一致，随剧情变化的进演化事件） */
+export interface NovelBaseline {
+  id: string
+  bookId: string
+  name: string
+  backgroundStory: string
+  keywords: string[]
+  enabled: boolean
+}
+
+/** 角色演化事件（动态 · 按章累积；chapter ≤ N 注入，未来事件不注入） */
+export interface NovelEvent {
+  id: string
+  bookId: string
+  roleName: string
+  content: string
+  keywords: string[]
+  /** 发生的原章节号（改写产生的新事件标当前节点关联章号） */
+  chapter: number
+  t: number
+  frozen: boolean
+}
+
+/** 原著域世界书条目（世界观/主线/伏笔） */
+export interface NovelWorldEntry {
+  id: string
+  bookId: string
+  name: string
+  content: string
+  keywords: string[]
+  enabled: boolean
+}
+
+/** 改写线节点（可写 · 引用原著章节 ID，不复制原文） */
+export interface RewriteNode {
+  id: string
+  bookId: string
+  /** 关联的原章节 ID（对照取原文） */
+  refChapterId: string
+  /** 关联原章号（chapter ≤ N 注入锚） */
+  chapter: number
+  /** 展示名：5-1 / 5-2 / 改6… */
+  title: string
+  /** 改写版全文 */
+  revised: string
+  /** 剧情锚点：本章结束时剧情状态一句话（定位靠锚点，不靠章节号） */
+  anchor: string
+  /** 改剧情预告（AI 推导、可编辑、推进时强约束注入） */
+  revisedPreview: Array<{ ch: string; title: string; brief: string }>
+  status: 'draft' | 'finalized'
+  createdAt: number
+  updatedAt: number
+}
+
+/** 一本小说（原著域完整数据，bookId 命名空间） */
+export interface NovelBook {
+  bookId: string
+  bookName: string
+  /** 改写起点章节号（默认第 1 章） */
+  startChIndex?: number
+  chapters: NovelChapter[]
+  baselines: NovelBaseline[]
+  events: NovelEvent[]
+  worldbook: NovelWorldEntry[]
+  /** 改写线（节点数组，按创建序） */
+  rewriteNodes: RewriteNode[]
+  createdAt: number
+  updatedAt: number
+}
+
 /** 自动更新差异：模型算出的增/改/删，供「更新预览」弹窗确认后写回 */
 export interface AutoUpdateDiff {
   wb: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
   cc: { add: Array<Record<string, unknown>>; update: Array<Record<string, unknown>>; remove: string[] }
   /**
-   * 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区 append，只增不改。
-   * append 项可带 _dedup 元数据（事件去重合并，见 event-dedup.ts）：
-   *   - { score, targetId }            = 疑似重复，等待用户在预览中定夺（跳过/合并/仍新增）
-   *   - { score, targetId, action:'merge' } = 用户选择「合并进原条目」→ 应用时执行合并
-   * skip = 已判定的重复事件（自动跳过 / 预览中用户选择跳过），可展开查看、可一键恢复
+   * 关联事件追加（背景/事件分流）：剧情进展 → 对应角色事件区 append，只增不改（v2.2 全量追加，
+   * 无判重拦截/无 _dedup 元数据；重复整理由人物卡编辑页「手动合并」完成）
    */
   events?: {
     append: Array<Record<string, unknown>>
-    skip?: Array<{ item: Record<string, unknown>; targetId: string; score: number }>
   }
 }
 
@@ -143,8 +226,6 @@ export interface ModSettings {
   siliconflowApiKey?: string
   /** 移动端模式：创作模式（现有对话模式改名，浅色主题）| 聊天模式（群聊，强制深色主题） */
   chatMode?: 'creation' | 'group'
-  /** 事件判重敏感度：strict 严格 | standard 标准（默认）| loose 宽松 */
-  eventDedupSensitivity?: 'strict' | 'standard' | 'loose'
 }
 
 /** 会话装载目标 */

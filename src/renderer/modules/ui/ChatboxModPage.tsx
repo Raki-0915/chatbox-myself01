@@ -30,7 +30,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconBook2, IconBookDownload, IconBookUpload, IconCircleCheck, IconCircleX, IconDownload, IconFolderOpen, IconGitMerge, IconHistory, IconRefresh, IconRobot, IconSearch, IconSettings, IconSnowflake, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
+import { IconArrowBack, IconBook2, IconBookDownload, IconBookUpload, IconCircleCheck, IconCircleX, IconDots, IconDownload, IconFolderOpen, IconGitMerge, IconHistory, IconMenu2, IconPencil, IconRefresh, IconRobot, IconSearch, IconSettings, IconSnowflake, IconTrash, IconUsers, IconWand } from '@tabler/icons-react'
 import NiceModal from '@ebay/nice-modal-react'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -80,6 +80,8 @@ import {
 import { toggleFrozen } from '../frozen-text'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
+import { importNovelBook, novelBooksAtom, parseNovelImport, removeNovelBook, upsertRewriteNode } from '../novel-rewrite'
+import type { NovelBook, NovelChapter, RewriteNode } from '../types'
 import { MOD_BUILD } from '../version'
 
 export function ChatboxModPage() {
@@ -1722,23 +1724,6 @@ function AutoUpdateTab() {
         onChange={(e) => void updateModSettings({ requireConfirm: e.currentTarget.checked })}
       />
       <Box>
-        <Text size="sm" fw={600}>事件判重敏感度</Text>
-        <Text size="xs" c="dimmed" mb={6}>
-          自动更新追加角色事件前自动查重：重复的直接跳过（预览可恢复）；「疑似重复」在预览里标橙，由你选择跳过/合并/仍新增。严格 = 只跳过几乎一样的；宽松 = 相似度高一点就跳过。
-        </Text>
-        <SegmentedControl
-          size="xs"
-          fullWidth
-          value={settings.eventDedupSensitivity ?? 'standard'}
-          onChange={(v) => void updateModSettings({ eventDedupSensitivity: v as 'strict' | 'standard' | 'loose' })}
-          data={[
-            { label: '严格', value: 'strict' },
-            { label: '标准', value: 'standard' },
-            { label: '宽松', value: 'loose' },
-          ]}
-        />
-      </Box>
-      <Box>
         <Text size="sm" fw={600}>分析最近消息数</Text>
         <Text size="xs" c="dimmed" mb={6}>
           自动更新分析时取最近多少条消息（用户与 AI 回复都计入）。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。
@@ -1804,6 +1789,41 @@ function NovelTab() {
   const [msg, setMsg] = useState('')
   // 续写要求（可选）：下一章要写到哪 / 什么情节
   const [extra, setExtra] = useState('')
+
+  /* ---- 原作续改（独立工作台入口） ---- */
+  const novels = useAtomValue(novelBooksAtom)
+  const [workbenchBookId, setWorkbenchBookId] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const novelFileRef = useRef<HTMLInputElement>(null)
+
+  const doNovelImport = async (file: File | null) => {
+    if (!file) return
+    setImporting(true)
+    setImportMsg('')
+    try {
+      const text = await file.text()
+      const r = parseNovelImport(text)
+      if (!r.ok) {
+        setImportMsg(`导入失败：${r.errors.slice(0, 3).join('；')}${r.errors.length > 3 ? `…等${r.errors.length}条` : ''}`)
+        return
+      }
+      if (r.book) await importNovelBook(r.book)
+      const warn = r.warnings.length ? `（${r.warnings.length} 条提示：${r.warnings.slice(0, 2).join('；')}）` : ''
+      setImportMsg(`导入成功：${r.book?.bookName}，${r.book?.chapters.length} 章 / ${r.book?.baselines.length} 人物 / ${r.book?.events.length} 事件 / ${r.book?.worldbook.length} 设定${warn}`)
+    } catch (e) {
+      setImportMsg(`读取失败：${String((e as Error)?.message ?? e)}`)
+    } finally {
+      setImporting(false)
+      if (novelFileRef.current) novelFileRef.current.value = ''
+    }
+  }
+
+  const removeBook = async (bookId: string, name: string) => {
+    if (!window.confirm(`删除《${name}》？原著库与改写线将一并移除，不可恢复。`)) return
+    await removeNovelBook(bookId)
+    if (workbenchBookId === bookId) setWorkbenchBookId(null)
+  }
 
   const doSplit = () => {
     const parts = splitChapters(text)
@@ -1891,9 +1911,52 @@ function NovelTab() {
 
   return (
     <Stack gap="md">
-      <Alert variant="light" title="小说续写">
-        粘贴正文 → 切章 → 预览 → <b>续写一章</b>（可填续写要求：写到哪/什么情节）→ 推入小说会话。改写末章（生成方案）为高级选项，保留在下方。
+      {/* 原作续改：整本小说改写工作台 */}
+      <Alert variant="light" color="grape" title="原作续改（整本小说改写）">
+        导入小说资料 JSON（章节/人物/事件/世界书）→ 从某一章开始改写 → 逐章推进。导入纯本地解析，原著库只读，与聊天域完全隔离。
       </Alert>
+      <input ref={novelFileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => void doNovelImport(e.target.files?.[0] ?? null)} />
+      <Group justify="space-between">
+        <Text size="sm" fw={600}>已导入书籍（{novels.length}）</Text>
+        <Button size="xs" variant="default" loading={importing} leftSection={<IconBookUpload size={14} />} onClick={() => novelFileRef.current?.click()}>
+          导入小说资料
+        </Button>
+      </Group>
+      {importMsg ? <Text size="xs" c="dimmed">{importMsg}</Text> : null}
+      {novels.length === 0 ? (
+        <Card withBorder padding="sm">
+          <Text size="sm" c="dimmed">还没有导入书籍。点「导入小说资料」选择 JSON 文件（格式见《小说导入资料与格式规范》：chapters / characterBaselines / evolutionEvents / worldbook）。</Text>
+        </Card>
+      ) : (
+        <Stack gap="xs">
+          {novels.map((b) => {
+            const done = b.rewriteNodes.filter((n) => n.status === 'finalized').length
+            const draft = b.rewriteNodes.length - done
+            return (
+              <Card key={b.bookId} withBorder padding="sm">
+                <Group justify="space-between" wrap="wrap">
+                  <Stack gap={2} style={{ flex: 1, minWidth: 180 }}>
+                    <Text size="sm" fw={600}>《{b.bookName}》</Text>
+                    <Text size="xs" c="dimmed">
+                      {b.chapters.length} 章（第 {b.chapters[0]?.chIndex}~{b.chapters.at(-1)?.chIndex} 章）· {b.baselines.length} 人物 · {b.events.length} 事件 · {b.worldbook.length} 设定
+                      {b.rewriteNodes.length > 0 ? ` · 改写线 ${done} 定稿${draft ? ` + ${draft} 草稿` : ''}` : ''}
+                    </Text>
+                  </Stack>
+                  <Group gap={6}>
+                    <Button size="compact-xs" color="grape" leftSection={<IconWand size={12} />} onClick={() => setWorkbenchBookId(b.bookId)}>
+                      进入改写
+                    </Button>
+                    <ActionIcon size="sm" color="red" variant="subtle" onClick={() => void removeBook(b.bookId, b.bookName)}>
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Group>
+              </Card>
+            )
+          })}
+        </Stack>
+      )}
+      <Divider label="小说续写（V10 旧功能：粘贴切章→续写→推入会话）" labelPosition="left" />
       <Textarea label="正文（支持 第X章/Chapter N/楔子/番外 等标题切分）" autosize minRows={8} value={text} onChange={(e) => setText(e.currentTarget.value)} />
       <Group grow>
         <Button size="xs" variant="default" onClick={doSplit}>切章</Button>
@@ -1935,7 +1998,494 @@ function NovelTab() {
         ))}
         {chapters.length === 0 ? <Text c="dimmed" size="sm">切章后在此预览。</Text> : null}
       </Stack>
+
+      {/* 原作续改：独立全屏改写工作台 */}
+      {workbenchBookId ? <NovelRewriteWorkbench bookId={workbenchBookId} onExit={() => setWorkbenchBookId(null)} /> : null}
     </Stack>
+  )
+}
+
+/* ======================== 原作续改 · 独立改写工作台（全屏） ======================== */
+
+function NovelRewriteWorkbench({ bookId, onExit }: { bookId: string; onExit: () => void }) {
+  const sessionId = useAtomValue(currentSessionIdAtom)
+  const novels = useAtomValue(novelBooksAtom)
+  const book = novels.find((x) => x.bookId === bookId)
+  // 当前浏览的原章节号（默认起点章）
+  const [viewCh, setViewCh] = useState<number>(book?.startChIndex ?? book?.chapters[0]?.chIndex ?? 1)
+  // 页签：原文 / 改写版 / 预告
+  const [tab, setTab] = useState<'original' | 'revised' | 'preview'>('original')
+  // 选中改写节点 id（某章有多个节点时选一个；默认最后一个）
+  const [nodeId, setNodeId] = useState<string | null>(null)
+  // 改写指令（无节点/重写时用）
+  const [instruction, setInstruction] = useState('')
+  // 草稿编辑文本（AI 生成后可手动改）
+  const [draftText, setDraftText] = useState('')
+  // 锚点编辑
+  const [anchorText, setAnchorText] = useState('')
+  // 重写模式（定稿后想重写本章）
+  const [rewriteMode, setRewriteMode] = useState(false)
+  // 改预告编辑（{index, ch, title, brief} 非空时展开编辑行）
+  const [previewEdit, setPreviewEdit] = useState<{ i: number; ch: string; title: string; brief: string } | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiMsg, setAiMsg] = useState('')
+  // 章节列表弹层（搜索 + 状态筛选 + 设为起点）
+  const [listOpen, setListOpen] = useState(false)
+  const [listQuery, setListQuery] = useState('')
+  const [listFilter, setListFilter] = useState<'all' | 'todo' | 'done'>('all')
+  // 取消生成（AbortController 贯穿改写/定稿请求）
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!book) return
+    const nodes = book.rewriteNodes.filter((n) => n.chapter === viewCh)
+    if (nodes.length > 0) setNodeId(nodes.at(-1)?.id ?? null)
+    else setNodeId(null)
+    setDraftText(nodes.at(-1)?.revised ?? '')
+    setAnchorText(nodes.at(-1)?.anchor ?? '')
+    setRewriteMode(false)
+    setInstruction('')
+  }, [book, viewCh])
+
+  if (!book) {
+    return (
+      <Modal fullScreen opened onClose={onExit} padding={0}>
+        <Stack align="center" gap="md" style={{ padding: 40 }}>
+          <Text c="dimmed">书籍不存在（可能已被删除）</Text>
+          <Button onClick={onExit} variant="default" size="xs">返回</Button>
+        </Stack>
+      </Modal>
+    )
+  }
+
+  const chapter = book.chapters.find((c) => c.chIndex === viewCh)
+  const node = book.rewriteNodes.find((n) => n.id === nodeId) ?? null
+  const prevNode = book.rewriteNodes.filter((n) => n.chapter < viewCh && n.status === 'finalized').at(-1) ?? null
+  const nextCh = book.chapters.find((c) => c.chIndex > viewCh) ?? null
+  const recentFinalized = book.rewriteNodes.filter((n) => n.status === 'finalized').sort((a, b) => a.chapter - b.chapter).slice(-3)
+
+  /** 组装注入（前情=最近定稿锚点或起点前概要；事件≤当前章；预告=原预告+最近改预告） */
+  const buildInj = () => {
+    const N = viewCh
+    const prior =
+      prevNode?.anchor ||
+      book.chapters
+        .filter((c) => c.chIndex < N)
+        .map((c) => `第${c.chIndex}章 ${c.title}：${c.summary}`)
+        .join('\n')
+        .slice(0, 3000)
+    return {
+      prior,
+      original: chapter?.original ?? '',
+      baselines: book.baselines.map((b) => ({ name: b.name, backgroundStory: b.backgroundStory, keywords: b.keywords })),
+      events: book.events.filter((e) => e.chapter <= N).map((e) => ({ roleName: e.roleName, content: e.content, chapter: e.chapter })),
+      originalPreview: chapter?.originalPreview ?? [],
+      revisedPreview: prevNode?.revisedPreview ?? [],
+    }
+  }
+
+  /** AI 改写本章（生成草稿节点） */
+  const doRewrite = async () => {
+    if (!sessionId || sessionId === 'new') {
+      setAiMsg('请先进入一个会话（取其模型设置，可从小说列表进入会话）')
+      return
+    }
+    if (!instruction.trim() && !node) {
+      setAiMsg('请先输入改写指令（要改什么：扩写某段/改变走向/新增情节…）')
+      return
+    }
+    setAiBusy(true)
+    setAiMsg('')
+    const ac = new AbortController()
+    abortRef.current = ac
+    try {
+      const { getSessionSettings } = await import('@/stores/session/session-settings')
+      const settings = await getSessionSettings(sessionId)
+      const { v283NovelRewrite } = await import('../novel')
+      const inj = buildInj()
+      const r = await v283NovelRewrite(settings, inj, node ? draftText : instruction.trim(), ac.signal)
+      const now = Date.now()
+      const newId = node?.id ?? `${bookId}-n${viewCh}-${now}`
+      await upsertRewriteNode(bookId, {
+        id: newId,
+        bookId,
+        refChapterId: chapter?.id ?? '',
+        chapter: viewCh,
+        title: node?.title ?? `改${viewCh}章 · ${chapter?.title ?? ''}`,
+        revised: r.revised,
+        anchor: r.anchor || anchorText,
+        revisedPreview: node?.revisedPreview ?? [],
+        status: 'draft',
+        createdAt: node?.createdAt ?? now,
+        updatedAt: now,
+      })
+      setDraftText(r.revised)
+      setAnchorText(r.anchor)
+      setInstruction('')
+      setTab('revised')
+      setAiMsg(node ? '已重新生成改写稿（草稿，可编辑后定稿）' : '改写完成（草稿，可编辑后定稿）')
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e)
+      setAiMsg(e instanceof DOMException && e.name === 'AbortError' || /abort|cancel/i.test(msg) ? '已取消（未保存任何内容）' : `失败：${msg}`)
+    } finally {
+      abortRef.current = null
+      setAiBusy(false)
+    }
+  }
+
+  /** 定稿：保存草稿 + 生成改预告（读最近≤3章） */
+  const doFinalize = async () => {
+    if (!node || !sessionId || sessionId === 'new') return
+    setAiBusy(true)
+    setAiMsg('正在定稿并生成改剧情预告…')
+    const ac = new AbortController()
+    abortRef.current = ac
+    try {
+      const { getSessionSettings } = await import('@/stores/session/session-settings')
+      const settings = await getSessionSettings(sessionId)
+      const { v283GenRevisedPreview } = await import('../novel')
+      // 1) 保存草稿（含手动编辑与锚点）
+      const finalizedNode: RewriteNode = { ...node, revised: draftText, anchor: anchorText, status: 'finalized', updatedAt: Date.now() }
+      // 2) 生成改预告：最近定稿（含本章）+ 原预告参照；预告章数默认 3（可后续编辑）
+      const recent = [...recentFinalized.filter((n) => n.chapter !== viewCh), finalizedNode].slice(-3)
+      const previews = await v283GenRevisedPreview(
+        settings,
+        recent.map((n) => ({ chapter: n.chapter, title: n.title, revised: n.revised, anchor: n.anchor })),
+        chapter?.originalPreview ?? [],
+        3,
+        ac.signal
+      )
+      finalizedNode.revisedPreview = previews.length ? previews : node.revisedPreview
+      await upsertRewriteNode(bookId, finalizedNode)
+      setAiMsg(previews.length ? `定稿完成，改预告已生成（${previews.length} 章，可在「双预告」页签编辑）` : '定稿完成（改预告未生成，可稍后手动编辑）')
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e)
+      setAiMsg(e instanceof DOMException && e.name === 'AbortError' || /abort|cancel/i.test(msg) ? '已取消（本章保持原状，未定稿）' : `失败：${msg}`)
+    } finally {
+      abortRef.current = null
+      setAiBusy(false)
+    }
+  }
+
+  /** 推进到下一章 */
+  const doAdvance = () => {
+    if (!nextCh) return
+    setViewCh(nextCh.chIndex)
+    setInstruction('')
+    setTab('revised')
+    setAiMsg('')
+  }
+
+  // 章节列表：搜索 + 状态筛选（纯前端过滤）
+  const listQ = listQuery.trim().toLowerCase()
+  const listChapters = book.chapters.filter((c) => {
+    const hit = !listQ || String(c.chIndex).includes(listQ) || (c.title ?? '').toLowerCase().includes(listQ) || (c.summary ?? '').toLowerCase().includes(listQ)
+    if (!hit) return false
+    const nodes = book.rewriteNodes.filter((n) => n.chapter === c.chIndex)
+    if (listFilter === 'todo') return nodes.length === 0
+    if (listFilter === 'done') return nodes.some((n) => n.status === 'finalized')
+    return true
+  })
+
+  return (
+    <Modal fullScreen opened onClose={onExit} padding={0} styles={{ body: { display: 'flex', flexDirection: 'column', height: '100%' }, inner: { padding: 0 }, content: { height: '100%' } }}>
+      {/* 顶栏：退出 / 书名·当前章 */}
+      <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid #eee', background: '#fafbfc', flexShrink: 0 }}>
+        <ActionIcon onClick={onExit} variant="subtle" size="lg" title="退出（进度已保存）"><IconArrowBack size={18} /></ActionIcon>
+        <Stack gap={0} align="center" style={{ flex: 1 }}>
+          <Text size="sm" fw={700}>《{book.bookName}》</Text>
+          <Text size="xs" c="dimmed">{chapter ? `${chapter.chIndex}章 · ${chapter.title}` : '章节不存在'}</Text>
+        </Stack>
+        <ActionIcon variant="subtle" size="lg" title="操作" onClick={() => window.confirm('退出后进度自动保存，改写线不会丢失。')}>
+          <IconDots size={18} />
+        </ActionIcon>
+      </Group>
+
+      {/* 章节胶囊：就近 ±3 章（号+名两行） + 列表入口 */}
+      <Box style={{ overflowX: 'auto', flexShrink: 0, borderBottom: '1px solid #f0f0f0', padding: '6px 10px' }}>
+        <Group gap={6} wrap="nowrap" align="center">
+          {book.chapters.filter((c) => Math.abs(c.chIndex - viewCh) <= 3).map((c) => {
+            const nodes = book.rewriteNodes.filter((n) => n.chapter === c.chIndex)
+            const finalized = nodes.some((n) => n.status === 'finalized')
+            const active = c.chIndex === viewCh
+            return (
+              <UnstyledButton
+                key={c.chIndex}
+                onClick={() => { setViewCh(c.chIndex); setTab('original') }}
+                style={{
+                  borderRadius: 10, padding: '3px 10px', whiteSpace: 'nowrap', flexShrink: 0,
+                  background: active ? (finalized ? '#16a34a' : '#7c3aed') : '#f3f4f6',
+                  border: finalized && !active ? '1px solid #bbf7d0' : '1px solid transparent',
+                }}
+              >
+                <Stack gap={0} align="center">
+                  <Text size="11" fw={700} c={active ? '#fff' : (finalized ? '#16a34a' : '#4b5563')}>{finalized ? '✓ ' : ''}{c.chIndex}{active ? ' ▶' : ''}</Text>
+                  <Text size="9" c={active ? '#fef9c3' : '#9ca3af'} style={{ maxWidth: 76, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+                    {c.title || '（无题）'}
+                  </Text>
+                </Stack>
+              </UnstyledButton>
+            )
+          })}
+          <ActionIcon variant="subtle" size="md" title="章节列表（搜索/筛选/设为起点）" onClick={() => setListOpen(true)}>
+            <IconMenu2 size={18} />
+          </ActionIcon>
+        </Group>
+      </Box>
+
+      {/* 主体：原文 / 改写版 / 预告 页签 */}
+      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Tabs value={tab} onChange={(v) => setTab((v ?? 'original') as 'original' | 'revised' | 'preview')} keepMounted={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Tabs.List grow>
+            <Tabs.Tab value="original">原文</Tabs.Tab>
+            <Tabs.Tab value="revised">改写版{node ? (node.status === 'finalized' ? ' ✓' : ' (草稿)') : ''}</Tabs.Tab>
+            <Tabs.Tab value="preview">双预告</Tabs.Tab>
+          </Tabs.List>
+          <Box style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+            <Tabs.Panel value="original">
+              {chapter ? (
+                <Stack gap="sm">
+                  <Text size="sm" fw={600}>{chapter.chIndex}章 · {chapter.title}</Text>
+                  {chapter.summary ? (
+                    <Box style={{ background: '#f3f4f6', borderLeft: '3px solid #cbd5e1', borderRadius: 6, padding: '6px 10px' }}>
+                      <Text size="xs" c="dimmed" style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{chapter.summary}</Text>
+                    </Box>
+                  ) : null}
+                  <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, color: '#374151' }}>
+                    {chapter.original || <span style={{ color: '#e11d48' }}>（本章原文为空——导入资料缺正文）</span>}
+                  </Text>
+                </Stack>
+              ) : <Text c="dimmed" size="sm">章节不存在</Text>}
+            </Tabs.Panel>
+            <Tabs.Panel value="revised">
+              {node && !rewriteMode ? (
+                <Stack gap="sm">
+                  <Group justify="space-between">
+                    <Badge color={node.status === 'finalized' ? 'green' : 'orange'}>{node.status === 'finalized' ? '已定稿' : '草稿'}</Badge>
+                    <Text size="xs" c="dimmed">{node.title}</Text>
+                  </Group>
+                  {node.status === 'finalized' ? (
+                    <>
+                      <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, color: '#374151' }}>{node.revised || '（暂无内容）'}</Text>
+                      <Divider />
+                      <Group justify="space-between">
+                        <Text size="xs" c="dimmed">锚点：{node.anchor || '未设置'}</Text>
+                        <Button size="compact-xs" variant="default" onClick={() => setRewriteMode(true)}>重写本章</Button>
+                      </Group>
+                    </>
+                  ) : (
+                    <>
+                      <Textarea
+                        label="改写稿（可手动编辑）"
+                        autosize
+                        minRows={8}
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.currentTarget.value)}
+                      />
+                      <TextInput
+                        size="xs"
+                        label="剧情锚点（本章结束时剧情状态，供下一章前情注入）"
+                        placeholder="如：罗素救出白婷婷，但帝释天在暗处盯上了他"
+                        value={anchorText}
+                        onChange={(e) => setAnchorText(e.currentTarget.value)}
+                      />
+                    </>
+                  )}
+                </Stack>
+              ) : (
+                <Stack gap="sm" style={{ paddingTop: 12 }}>
+                  <Textarea
+                    label={node ? '改写指令（覆盖本章，重新生成）' : '改写指令'}
+                    autosize
+                    minRows={4}
+                    placeholder="要改什么？如：本章扩写罗素潜入净身房的复仇戏，增加与帝释天的正面冲突；或：删掉本章的偶遇情节，改为直接遭遇追杀。"
+                    value={instruction}
+                    onChange={(e) => setInstruction(e.currentTarget.value)}
+                  />
+                  {node ? (
+                    <Group justify="space-between">
+                      <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setRewriteMode(false)}>取消重写</Button>
+                      <Text size="xs" c="dimmed">点底部「AI 改写本章」覆盖当前稿</Text>
+                    </Group>
+                  ) : (
+                    <Text size="xs" c="dimmed">AI 将基于：前情概要（最近定稿锚点）+ 本章原文 + 人物基线 + 已发生事件（≤本章）+ 双预告 生成改写稿。可在底部点「AI 改写本章」。</Text>
+                  )}
+                </Stack>
+              )}
+            </Tabs.Panel>
+            <Tabs.Panel value="preview">
+              <Stack gap="md">
+                <Box>
+                  <Text size="xs" fw={700} c="blue" mb={4}>原剧情预告（参照系 · 点条目看对应章节）</Text>
+                  <Stack gap={4}>
+                    {(chapter?.originalPreview ?? []).map((p) => (
+                      <Card key={p.ch} withBorder padding="xs" style={{ cursor: 'pointer' }} onClick={() => { const c = book.chapters.find((x) => x.chIndex === p.ch); if (c) { setViewCh(c.chIndex); setTab('original') } }}>
+                        <Text size="sm">原{p.ch}章 · {p.title}</Text>
+                        <Text size="xs" c="dimmed">{p.brief}</Text>
+                      </Card>
+                    ))}
+                    {!chapter?.originalPreview?.length ? <Text size="xs" c="dimmed">本章没有原预告（资料未提供或已到全书末尾）</Text> : null}
+                  </Stack>
+                </Box>
+                <Divider />
+                <Box>
+                  <Text size="xs" fw={700} c="grape" mb={4}>改剧情预告（执行约束 · AI 推导可编辑）</Text>
+                  <Stack gap={4}>
+                    {(node?.revisedPreview ?? []).map((p, i) =>
+                      previewEdit?.i === i ? (
+                        <Card key={i} withBorder padding="xs">
+                          <Stack gap={4}>
+                            <Group gap={6}>
+                              <TextInput size="xs" style={{ width: 90 }} value={previewEdit.ch} onChange={(e) => setPreviewEdit({ ...previewEdit, ch: e.currentTarget.value })} />
+                              <TextInput size="xs" style={{ flex: 1 }} value={previewEdit.title} onChange={(e) => setPreviewEdit({ ...previewEdit, title: e.currentTarget.value })} />
+                            </Group>
+                            <Textarea size="xs" autosize minRows={2} value={previewEdit.brief} onChange={(e) => setPreviewEdit({ ...previewEdit, brief: e.currentTarget.value })} />
+                            <Group justify="flex-end" gap={6}>
+                              <Button
+                                size="compact-xs"
+                                variant="light"
+                                color="teal"
+                                onClick={async () => {
+                                  if (!node) return
+                                  const list = [...node.revisedPreview]
+                                  list[i] = { ch: previewEdit.ch, title: previewEdit.title, brief: previewEdit.brief }
+                                  await upsertRewriteNode(bookId, { ...node, revisedPreview: list, updatedAt: Date.now() })
+                                  setPreviewEdit(null)
+                                  setAiMsg('改预告已更新')
+                                }}
+                              >
+                                保存
+                              </Button>
+                              <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setPreviewEdit(null)}>取消</Button>
+                            </Group>
+                          </Stack>
+                        </Card>
+                      ) : (
+                        <Card key={i} withBorder padding="xs">
+                          <Group justify="space-between">
+                            <Stack gap={2} style={{ flex: 1 }}>
+                              <Text size="sm">{p.ch} · {p.title}</Text>
+                              <Text size="xs" c="dimmed">{p.brief}</Text>
+                            </Stack>
+                            <ActionIcon size="sm" variant="subtle" onClick={() => setPreviewEdit({ i, ch: p.ch, title: p.title, brief: p.brief })}>
+                              <IconPencil size={14} />
+                            </ActionIcon>
+                          </Group>
+                        </Card>
+                      )
+                    )}
+                    {!node?.revisedPreview?.length ? <Text size="xs" c="dimmed">定稿本章后由 AI 生成改预告（最多读最近 3 章），可手动编辑。</Text> : null}
+                  </Stack>
+                </Box>
+              </Stack>
+            </Tabs.Panel>
+          </Box>
+        </Tabs>
+      </Box>
+
+      {/* 底部操作条 */}
+      <Box px="md" py="sm" style={{ borderTop: '1px solid #eee', background: '#fafbfc', flexShrink: 0 }}>
+        <Stack gap={6}>
+          <Group justify="space-between">
+            {node && !rewriteMode ? (
+              <Text size="xs" c="dimmed" style={{ flex: 1 }}>锚点：{node.anchor || '未设置'}</Text>
+            ) : prevNode ? (
+              <Text size="xs" c="dimmed" style={{ flex: 1 }}>上一锚点：{prevNode.anchor || '未设置'}</Text>
+            ) : (
+              <UnstyledButton onClick={() => setListOpen(true)} style={{ flex: 1, textAlign: 'left', color: '#7c3aed', fontWeight: 600, fontSize: 13 }}>
+                从起点章开始 ▾（点击选择起点章）
+              </UnstyledButton>
+            )}
+            <Group gap={8}>
+              {(!node || rewriteMode) ? (
+                aiBusy ? (
+                  <Button size="xs" color="red" onClick={() => abortRef.current?.abort()}>取消生成</Button>
+                ) : (
+                  <Button size="xs" color="grape" disabled={!instruction.trim()} onClick={() => void doRewrite()}>
+                    AI 改写本章
+                  </Button>
+                )
+              ) : node.status === 'draft' ? (
+                aiBusy ? (
+                  <Button size="xs" color="red" onClick={() => abortRef.current?.abort()}>取消</Button>
+                ) : (
+                  <Button size="xs" color="teal" disabled={!draftText.trim()} onClick={() => void doFinalize()}>
+                    定稿（生成改预告）
+                  </Button>
+                )
+              ) : (
+                aiBusy ? (
+                  <Button size="xs" color="red" onClick={() => abortRef.current?.abort()}>取消</Button>
+                ) : (
+                  <Button size="xs" color="teal" variant="default" onClick={() => void doFinalize()}>
+                    重新定稿
+                  </Button>
+                )
+              )}
+              {node && node.status === 'finalized' && !rewriteMode ? (
+                <Button size="xs" color="grape" disabled={!nextCh} onClick={doAdvance}>
+                  {nextCh ? `推进 · 改写第${nextCh.chIndex}章` : '已是最后一章'}
+                </Button>
+              ) : null}
+            </Group>
+          </Group>
+          {aiMsg ? <Text size="xs" c="dimmed">{aiMsg}</Text> : null}
+        </Stack>
+      </Box>
+
+      {/* 章节列表弹层：搜索 / 筛选 / 设为起点 */}
+      <Modal fullScreen opened={listOpen} onClose={() => setListOpen(false)} padding={0} styles={{ body: { display: 'flex', flexDirection: 'column', height: '100%' }, inner: { padding: 0 }, content: { height: '100%' } }}>
+        <Stack gap={0} style={{ height: '100%' }}>
+          <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid #eee', background: '#fafbfc', flexShrink: 0 }}>
+            <ActionIcon onClick={() => setListOpen(false)} variant="subtle" size="lg"><IconArrowBack size={18} /></ActionIcon>
+            <Text size="sm" fw={700}>章节列表 · 《{book.bookName}》</Text>
+            <Text size="xs" c="dimmed">{book.chapters.length} 章</Text>
+          </Group>
+          <Box px="md" py="sm" style={{ borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+            <Stack gap={6}>
+              <TextInput size="xs" placeholder="搜索章节号 / 标题 / 概述关键词" value={listQuery} onChange={(e) => setListQuery(e.currentTarget.value)} leftSection={<IconSearch size={14} />} />
+              <SegmentedControl size="xs" fullWidth value={listFilter} onChange={(v) => setListFilter(v as 'all' | 'todo' | 'done')} data={[{ label: '全部', value: 'all' }, { label: '待改写', value: 'todo' }, { label: '已定稿', value: 'done' }]} />
+            </Stack>
+          </Box>
+          <Box style={{ flex: 1, overflow: 'auto', padding: '4px 10px' }}>
+            <Stack gap={4}>
+              {listChapters.map((c) => {
+                const nodes = book.rewriteNodes.filter((n) => n.chapter === c.chIndex)
+                const done = nodes.some((n) => n.status === 'finalized')
+                const draft = nodes.some((n) => n.status === 'draft')
+                const active = c.chIndex === viewCh
+                return (
+                  <UnstyledButton
+                    key={c.chIndex}
+                    onClick={() => { setViewCh(c.chIndex); setTab('original'); setListOpen(false) }}
+                    style={{ display: 'block', width: '100%', borderRadius: 10, border: active ? '1.5px solid #7c3aed' : '1px solid #e5e7eb', background: active ? '#f5f3ff' : '#fff', padding: '8px 10px', textAlign: 'left' }}
+                  >
+                    <Group justify="space-between" wrap="nowrap">
+                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                        <Text size="sm" fw={700} c={done ? '#16a34a' : active ? '#7c3aed' : undefined}>{done ? '✓ ' : ''}{c.chIndex}</Text>
+                        <Text size="sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || '（无题）'}</Text>
+                      </Group>
+                      <Group gap={4} wrap="nowrap">
+                        {draft && !done ? <Badge size="xs" color="orange" variant="light">草稿</Badge> : null}
+                        {done ? <Badge size="xs" color="green" variant="light">已定稿</Badge> : null}
+                        {active ? <Badge size="xs" color="violet" variant="filled">起点</Badge> : null}
+                      </Group>
+                    </Group>
+                    {c.summary ? (
+                      <Text size="xs" c="dimmed" style={{ marginTop: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.5 }}>{c.summary}</Text>
+                    ) : null}
+                  </UnstyledButton>
+                )
+              })}
+              {listChapters.length === 0 ? <Text size="xs" c="dimmed" ta="center" style={{ padding: 24 }}>没有匹配的章节（可换关键词或筛选）</Text> : null}
+            </Stack>
+          </Box>
+          <Box px="md" py="xs" style={{ borderTop: '1px solid #eee', flexShrink: 0 }}>
+            <Text size="xs" c="dimmed" ta="center">点章节 = 设为起点并跳转；起点可随时更换，原草稿/定稿不丢</Text>
+          </Box>
+        </Stack>
+      </Modal>
+    </Modal>
   )
 }
 

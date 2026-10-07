@@ -140,12 +140,33 @@ function replaceMultiLine(lines: string[], used: Set<number>, frozenText: string
   return false
 }
 
+/** 字段是否存在冻结段（非空白文本） */
+export function hasFrozenOnField(list: Array<string | FrozenSegment> | undefined, field: string): boolean {
+  return norm(list, field).some((x) => x.field === field && !!x.text)
+}
+
+/**
+ * 字段级硬锁（v3，升级保护语义）：
+ * - 字段存在冻结段 → 整个字段保持旧值（AI 既不能改写冻结段，也不能在字段里追加新内容）
+ * - 字段无冻结段 → 照常采用 AI 新内容
+ * 由自动更新写回处传入「更新前旧值」实现整体回退。
+ */
+export function applyFrozenLock(
+  newText: string,
+  oldText: string,
+  frozenList: Array<string | FrozenSegment> | undefined,
+  field: string
+): string {
+  return hasFrozenOnField(frozenList, field) ? oldText : newText
+}
+
 /**
  * 应用端硬保护（按字段，原文快照 + 相似还原 + 末尾补回）：
  * - AI 新内容中保留/仅空白差异包含的冻结段 → 原样保留（不剥离、不移动）
  * - 被 AI 改写的冻结段 → 原位替换回冻结原文（不再残留改写版）
  * - 被 AI 彻底删除的冻结段 → 按冻结顺序原文补回末尾
  * - 未冻结部分照常采用 AI 新内容；其它字段的冻结段不影响本字段
+ * 注：自动更新写回已改用字段级硬锁 applyFrozenLock；本函数保留供非锁场景使用。
  */
 export function applyFrozenProtection(
   newText: string,

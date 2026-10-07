@@ -290,9 +290,9 @@ export default defineConfig(({ mode }) => {
       build: {
         outDir: isProduction ? 'release/app/dist/renderer' : undefined,
         target: 'es2020', // Avoid static initialization blocks for browser compatibility
-        // [Chatbox Mod] 本地构建内存受限：生产环境关闭 sourcemap
+        // [Chatbox Mod] 本地构建内存受限：生产环境关闭 sourcemap；沙箱负载高时可跳过压缩（CHATBOX_NO_MINIFY=1）
         sourcemap: false,
-        minify: isProduction ? 'esbuild' : false, // Use esbuild for faster, less memory-intensive minification
+        minify: isProduction ? (process.env.CHATBOX_NO_MINIFY === '1' ? false : 'esbuild') : false, // Use esbuild for faster, less memory-intensive minification
         rollupOptions: {
           output: {
             entryFileNames: 'js/[name].[hash].js',

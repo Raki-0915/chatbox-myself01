@@ -180,6 +180,121 @@ export async function v27Continue(sessionSettings: SessionSettings, context: str
   return out
 }
 
+/* ======================== 原作续改 AI ======================== */
+
+export interface NovelRewriteResult {
+  /** 改写稿正文 */
+  revised: string
+  /** 剧情锚点：本章结束时剧情状态一句话（供下一章前情注入） */
+  anchor: string
+}
+
+/**
+ * 改写一章：注入 = 前情概要 + 当前章原文 + 人物基线 + chapter≤N 演化事件 + 双预告 + 用户指令。
+ * 返回改写稿与剧情锚点（锚点用于推进时作前情，不绑定章节号）。
+ */
+export async function v283NovelRewrite(
+  sessionSettings: SessionSettings,
+  inj: {
+    prior: string
+    original: string
+    baselines: Array<{ name: string; backgroundStory: string; keywords: string[] }>
+    events: Array<{ roleName: string; content: string; chapter: number }>
+    originalPreview: Array<{ ch: number; title: string; brief: string }>
+    revisedPreview: Array<{ ch: string; title: string; brief: string }>
+  },
+  instruction: string,
+  signal?: AbortSignal
+): Promise<NovelRewriteResult> {
+  const model = await createModel(sessionSettings)
+  const bl = inj.baselines.map((b) => `【${b.name}】${b.backgroundStory || ''}`).join('\n')
+  const ev = inj.events.map((e) => `第${e.chapter}章·${e.roleName}：${e.content}`).join('\n')
+  const op = inj.originalPreview.map((p) => `原${p.ch}章《${p.title}》：${p.brief}`).join('\n')
+  const rp = inj.revisedPreview.map((p) => `${p.ch}《${p.title}》：${p.brief}`).join('\n')
+  const prompt = [
+    '你是小说续改作者。请基于下面的资料，把这一章改写成符合用户指令的新版本。',
+    '要求：',
+    '1. 严格保持人物设定（以人物基线为准，未提到的不得凭空添加能力/身份）；',
+    '2. 与"前情概要"自然衔接，不重复前情内容；',
+    '3. 改写版是对"当前章原文"的重新创作：可扩写、可改走向，但整体仍作为这一章的替换稿；',
+    '4. 如果用户指令要求新增/删减情节，按指令执行；',
+    '5. 输出格式：第一行输出本章的"剧情锚点"（一句话概括本章结束时剧情状态，前缀【锚点】），随后空一行，再输出完整章节正文。',
+    '',
+    `--- 前情概要 ---\n${String(inj.prior ?? '').slice(0, 3000)}`,
+    '',
+    `--- 人物基线（全书一致） ---\n${String(bl).slice(0, 3000)}`,
+    '',
+    `--- 已发生的演化事件（截至本章，未来事件不得使用） ---\n${String(ev).slice(0, 4000)}`,
+    '',
+    `--- 双预告 ---\n原预告（原剧情参照系）:\n${String(op).slice(0, 1500)}\n改预告（推进约束）:\n${String(rp).slice(0, 1500)}`,
+    '',
+    `--- 当前章原文 ---\n${String(inj.original ?? '').slice(0, 10000)}`,
+    '',
+    `--- 用户改写指令 ---\n${instruction}`,
+  ].join('\n')
+  const r = await model.chat(
+    [
+      { role: 'system', content: '你是小说续改作者，直接输出正文。' },
+      { role: 'user', content: prompt },
+    ], { signal }
+  )
+  const out = resultText(r).trim()
+  if (!out) throw new Error('模型未返回正文')
+  // 拆锚点与正文
+  const m = out.match(/^【锚点】\s*(.+?)\s*\n+/)
+  if (m) {
+    return { revised: out.slice(m[0].length).trim(), anchor: m[1].trim() }
+  }
+  return { revised: out, anchor: '' }
+}
+
+/**
+ * 生成改剧情预告：基于最近 N 章（最多 3 章）改写稿 + 原预告参照，推导未来 count 章预告。
+ * 输出 [{ch:"改205", title, brief}]，JSON 提取失败返回空数组（不阻断定稿）。
+ */
+export async function v283GenRevisedPreview(
+  sessionSettings: SessionSettings,
+  recent: Array<{ chapter: number; title: string; revised: string; anchor: string }>,
+  originalPreview: Array<{ ch: number; title: string; brief: string }>,
+  count: number,
+  signal?: AbortSignal
+): Promise<Array<{ ch: string; title: string; brief: string }>> {
+  const model = await createModel(sessionSettings)
+  const recentText = recent
+    .map((c) => `【改${c.chapter}章 ${c.title}】${String(c.revised).slice(0, 1500)}`)
+    .join('\n')
+  const op = originalPreview.map((p) => `原${p.ch}章《${p.title}》：${p.brief}`).join('\n')
+  const prompt = [
+    `你是小说编辑。请基于最近 ${recent.length} 章改写稿的走向，推导后续 ${count} 章（改${recent.at(-1)?.chapter ?? ''}之后）的剧情预告。`,
+    '要求：',
+    '1. 预告必须与改写走向一致（不是原剧情，是改写线的未来）；',
+    '2. 每章一句话梗概即可，注明章名（如"改206 · 血洗长街"）；',
+    '3. 原预告仅作参照系：如果改写偏离原剧情，以改写线为准。',
+    `输出 JSON 数组：{ "ch": "改206", "title": "章名", "brief": "一句话梗概" }，共 ${count} 项。只输出 JSON。`,
+    '',
+    `--- 最近改写稿 ---\n${String(recentText).slice(0, 6000)}`,
+    '',
+    `--- 原预告参照 ---\n${String(op).slice(0, 1500)}`,
+  ].join('\n')
+  const r = await model.chat(
+    [
+      { role: 'system', content: '你是小说编辑，只输出 JSON。' },
+      { role: 'user', content: prompt },
+    ], { signal }
+  )
+  const parsed = extractJsonBlock(resultText(r))
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+    .map((x) => ({
+      ch: String(x.ch ?? `改${count}`),
+      title: String(x.title ?? ''),
+      brief: String(x.brief ?? ''),
+    }))
+    .filter((x) => x.brief)
+    .slice(0, count)
+}
+
 /* ======================== 会话操作 ======================== */
 
 /** 建"小说·书名"会话 */

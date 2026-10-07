@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { MOD_STORAGE_KEYS, modGetItem, modSetItem } from './storage'
 import type { CharacterCard, ModBackup, ModFolder, ModLogEntry, ModSettings, SessionBookmark, WorldBookEntry } from './types'
 import { clearSessionBookmarks, dropBookmarksForMessages, toggleBookmark } from './branches'
+import { novelBooksAtom } from './novel-rewrite'
 
 /* ======================== 默认值 ======================== */
 
@@ -21,7 +22,6 @@ export const DEFAULT_MOD_SETTINGS: ModSettings = {
   ccInjectionLimit: 6000,
   siliconflowApiKey: '',
   chatMode: 'creation',
-  eventDedupSensitivity: 'standard',
 }
 
 /* ======================== Jotai atoms ======================== */
@@ -48,7 +48,7 @@ export async function loadModStore(): Promise<void> {
   if (loaded) return
   if (loadPromise) return loadPromise
   loadPromise = (async () => {
-    const [wb, cc, folders, settings, log, backups, bookmarks] = await Promise.all([
+    const [wb, cc, folders, settings, log, backups, bookmarks, novels] = await Promise.all([
       modGetItem<WorldBookEntry[]>(MOD_STORAGE_KEYS.worldBooks, []),
       modGetItem<CharacterCard[]>(MOD_STORAGE_KEYS.characterCards, []),
       modGetItem<ModFolder[]>(MOD_STORAGE_KEYS.folders, []),
@@ -56,6 +56,7 @@ export async function loadModStore(): Promise<void> {
       modGetItem<ModLogEntry[]>(MOD_STORAGE_KEYS.log, []),
       modGetItem<ModBackup[]>(MOD_STORAGE_KEYS.backups, []),
       modGetItem<SessionBookmark[]>(MOD_STORAGE_KEYS.bookmarks, []),
+      modGetItem<import('./types').NovelBook[]>(MOD_STORAGE_KEYS.novelBooks, []),
     ])
     // 直接写 atom 初始值（getDefaultStore 在 renderer 中可用）
     const { getDefaultStore } = await import('jotai')
@@ -67,6 +68,7 @@ export async function loadModStore(): Promise<void> {
     store.set(modLogAtom, log)
     store.set(modBackupsAtom, backups)
     store.set(bookmarksAtom, bookmarks)
+    store.set(novelBooksAtom, novels)
     loaded = true
   })()
   return loadPromise
