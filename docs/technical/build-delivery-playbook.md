@@ -60,6 +60,13 @@
 **最终解法**：**非 public 条目从基底 APK 字节级原样复制**（`ZipFile.writestr(info, src.read(fn))` 保留全部 entry 属性），只替换 `public/`。.so 属性与基底完全一致（`0.0 unx ... stor`），真机安装成功。
 **教训**：能复制的绝不重写；重打包追求"最小改动"。
 
+### 4b. 网页产物路径写错（V17 · 新代码"不生效"）
+
+**现象**：用户截图设置页，官方备份勾选项仍是 4 项，新增的「创作数据」项没出现；但代码、构建产物、cap sync 产物都确认含新功能。
+**根因**：基底 APK 的网页产物在 **`assets/public/`**（Android 原生 assets 路径），重打包脚本却按旧认知跳过了 `public/`（无 assets 前缀）并把新产物写入 `public/`。结果 APK 里**两套 public 并存**：基底的旧 `assets/public/`（491 个文件，WebView 实际加载它）+ 新 `public/`（WebView 不加载）——等于交付了 V16 旧 UI。**zip 里文件在 ≠ WebView 加载它**。
+**修复**：重打包时剔除基底 `assets/public/*` 与历史残留 `public/*`，新产物写入 `assets/public/`；交付前用 `unzip -p <apk> assets/public/js/index.*.js | grep <新功能特征串>` 验证。
+**教训**：**APK 内路径必须跟 WebView 实际加载路径（assets/ 前缀）一致**；交付验证不能只验"新代码在不在"，要验"新代码在不在 WebView 加载的路径"。
+
 ### 5. NO_MINIFY 的交付副作用
 
 **现象**：为降沙箱负载关闭 JS 压缩，主 bundle 15.3MB，APK 体积 24.7MB→46MB。
@@ -71,7 +78,7 @@
 ## 三、固化纪律（铁律）
 
 1. **单进程构建**：句柄丢失 ≠ 进程死亡；先查进程再决定；不删运行中产物；不重复启动
-2. **重打包铁律**：非 public 从基底字节级复制；`.so` / `dexopt` 必须 STORED
+2. **重打包铁律**：非网页条目从基底字节级复制；`.so` / `dexopt` 必须 STORED；**网页产物路径 = `assets/public/`**（不是 `public/`）：剔除基底 `assets/public/*`、写入 `assets/public/`，交付前验证 APK 内该路径含新功能特征串
 3. **密钥唯一**：`v48-keys/签名密钥/chatbox-mod.keystore`（指纹 aa46319b85）；用前 keytool 验指纹
 4. **交付前五查**：
    - `unzip -t <apk>` → zip 完整性
