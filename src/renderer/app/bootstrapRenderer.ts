@@ -69,7 +69,8 @@ export async function bootstrapRenderer(application: RendererApplication): Promi
     initRecentDirectoriesStore(),
   ])
 
-  void i18n.changeLanguage(settings.language)
+  // 强制简体中文界面：用户明确要求界面语言必须为中文，不跟随系统/设置里的英文
+  void i18n.changeLanguage('zh-Hans')
   initLoginLicenseStateReconciliation()
 
   if (platform.type === 'desktop') {
