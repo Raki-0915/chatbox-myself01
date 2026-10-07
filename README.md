@@ -7,15 +7,16 @@
 
 ## 构建与交付纪律（V16 复盘固化 · 接手必读）
 
-> 2026-10-07 V16 增量交付暴露 5 个问题（双构建并发、删运行中产物、密钥用错、native 库被压缩、zip 结构差异）；V17 又暴露 2 个（重打包路径写错 `public/` 而非 `assets/public/` 导致新代码不生效；强制中文逻辑未延续导致界面变英文）。完整复盘见 `docs/technical/build-delivery-playbook.md`。以下为铁律：
+> 2026-10-07 V16 增量交付暴露 5 个问题（双构建并发、删运行中产物、密钥用错、native 库被压缩、zip 结构差异）；V17 又暴露 2 个（重打包路径写错 `public/` 而非 `assets/public/` 导致新代码不生效；强制中文逻辑未延续导致界面变英文）；V17.3 再暴露 1 个（**移动端构建未注入 `CHATBOX_BUILD_TARGET=mobile_app`**，产物以 `"unknown"` 平台运行 → WebPlatform 读 localStorage，SQLite 旧数据全部读不到「数据消失」+ 移动端应隐藏的 Keyboard Shortcuts 入口错误显示）。完整复盘见 `docs/technical/build-delivery-playbook.md`。以下为铁律：
 
-0. **构建前必读（强制流程）**：**每次构建/重打包/交付前，必须先完整通读 `docs/technical/build-delivery-playbook.md`**（五查清单、重打包铁律、密钥、参考命令），确认无遗漏后才可执行构建；违反本流程视为流程事故
+0. **构建前必读（强制流程）**：**每次构建/重打包/交付前，必须先完整通读 `docs/technical/build-delivery-playbook.md`**（六查清单、重打包铁律、密钥、参考命令），确认无遗漏后才可执行构建；违反本流程视为流程事故
 1. **单进程构建**：后台句柄丢失 ≠ 进程死亡，先 `ps` 查进程再决定；绝不删运行中构建的输出；同一构建绝不启动两次
 2. **重打包铁律**：非网页条目从基底 APK **字节级原样复制**（不重写）；`lib/*.so` 与 `assets/dexopt/*` 必须保持 STORED（压缩即真机安装失败）；**网页产物路径是 `assets/public/`**（Android 原生 assets，不是 `public/`）——重打包必须剔除基底的 `assets/public/*` 并把新产物写入 `assets/public/`，交付前验证 APK 内 `assets/public/js/index.*.js` 含新功能特征串
 3. **密钥唯一**：只用 `v48-keys/签名密钥/chatbox-mod.keystore`（指纹 aa46319b85），用前 `keytool` 验指纹
-4. **交付前五查**：`unzip -t`（zip 完整）/ `zipalign -c -p 4`（对齐）/ `apksigner verify`（签名）/ `aapt dump badging`（manifest 可解析）/ `.so` 存储方式必须 Stored
-5. **体积默认压缩**：`CHATBOX_NO_MINIFY` 仅作应急，交付后补压缩版（否则慢网下载易损坏）
-6. **界面语言硬约束**：本项目界面**必须简体中文**（用户明确要求，不接受英文/跟随系统）。启动强制 `i18n.changeLanguage('zh-Hans')`，改动涉及语言/设置初始化时不得回退为 `settings.language`
+4. **移动端构建命令（V17.3 新增铁律）**：交付 Android APK 的 renderer 构建**必须**用 `pnpm run mobile:sync:android`（其内部注入 `CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android`）；**禁止裸 `electron-vite build` / 裸 `npx cross-env ... electron-vite build` 交付移动端**（不注入 target 时产物 `CHATBOX_BUILD_TARGET="unknown"`，运行时走 WebPlatform→localStorage，读不到 SQLite 旧数据=用户数据「消失」，且平台判定错乱导致移动端应隐藏的入口错误显示）
+5. **交付前六查**：`unzip -t`（zip 完整）/ `zipalign -c -p 4`（对齐）/ `apksigner verify`（签名）/ `aapt dump badging`（manifest 可解析）/ `.so` 存储方式必须 Stored / **`unzip -p <apk> assets/public/js/index.*.js | grep -c 'CHATBOX_BUILD_TARGET="mobile_app"'` 必须 ≥1**（构建 target 正确注入，防数据层错位）
+6. **体积默认压缩**：`CHATBOX_NO_MINIFY` 仅作应急，交付后补压缩版（否则慢网下载易损坏）
+7. **界面语言硬约束**：本项目界面**必须简体中文**（用户明确要求，不接受英文/跟随系统）。启动强制 `i18n.changeLanguage('zh-Hans')`，改动涉及语言/设置初始化时不得回退为 `settings.language`
 
 ---
 

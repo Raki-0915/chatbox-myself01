@@ -1,6 +1,6 @@
-# 增量构建与交付复盘（V16 · 2026-10-07）
+# 增量构建与交付复盘（V16 · 2026-10-07；V17.3 补丁 2026-10-07）
 
-> **⚠️ 本文件为「每次构建前必读」（强制流程）**：任何一次 renderer 构建 / 重打包 / 签名 / 交付，动手前必须先完整通读本文（尤其「固化纪律」与「重打包参考命令」两节），并逐项执行五查清单；违反即视为流程事故。接手本仓库的 AI（或开发者）在构建交付前必须阅读并遵守本文。
+> **⚠️ 本文件为「每次构建前必读」（强制流程）**：任何一次 renderer 构建 / 重打包 / 签名 / 交付，动手前必须先完整通读本文（尤其「固化纪律」与「重打包参考命令」两节），并逐项执行六查清单；违反即视为流程事故。接手本仓库的 AI（或开发者）在构建交付前必须阅读并遵守本文。
 
 ---
 
@@ -9,15 +9,16 @@
 ```
 ① 改代码（仅 src/renderer/，不动 android/）
         ↓
-② build:renderer（CHATBOX_NO_MINIFY=1 仅应急，常规开压缩） ~11min
+② pnpm run mobile:sync:android —— 移动端唯一正确入口（注入 CHATBOX_BUILD_TARGET=mobile_app + CHATBOX_BUILD_PLATFORM=android 后 build:renderer；CHATBOX_NO_MINIFY=1 仅应急，常规开压缩） ~11min
         ↓
 ③ npx cap sync android（拷贝网页产物进 assets） ~1min
         ↓
-④ 重打包：非 public 条目从基底 APK 字节级复制 + 替换 public/
+④ 重打包：非 public 条目从基底 APK 字节级复制 + 替换 assets/public/
         ↓
 ⑤ zipalign -f -p 4 → apksigner 用 v48 密钥签名
         ↓
-⑥ 五查验证 → 交付
+⑥ 六查验证（含 CHATBOX_BUILD_TARGET="mobile_app" 产物断言）→ 交付
+```
 ```
 
 **全量构建（gradle assembleRelease）仅在以下情况使用**：
@@ -74,6 +75,15 @@
 **修复**：`bootstrapRenderer.ts` 强制 `void i18n.changeLanguage('zh-Hans')`（不跟随 settings.language）；偏好固化「界面语言必须简体中文，不接受英文」。
 **教训**：**用户早期明确的产品级约束必须随仓库迁移延续**，接手时先核对「历史硬约束清单」；涉及语言/设置初始化的改动不得悄悄回退强制逻辑。
 
+### 4d. 移动端构建未注入 mobile_app target（V17.3 · 数据「消失」+ 平台错乱）
+
+**现象**：用户覆盖安装 V17.1~V17.3 后（尤其 V17.3）会话/世界书/人物卡数据全部「消失」；同时移动端本应隐藏的「Keyboard Shortcuts」设置入口出现在安卓设置页（安卓无物理键盘，无法使用）。用户反问「之前开发过程中不是挺好的吗」——开发/测试在桌面/Web 环境有物理键盘、数据在测试环境，掩盖了真机问题。
+**根因**：交付 Android 的 renderer 构建直接用了 `npx cross-env CHATBOX_ELECTRON_VITE_TARGET=renderer electron-vite build`（未注入 `CHATBOX_BUILD_TARGET`），产物 `const CHATBOX_BUILD_TARGET="unknown"`。`createPlatform()` 里 `CHATBOX_BUILD_TARGET === 'mobile_app'` 分支不命中、`window.electronAPI` 不存在 → 落到 **WebPlatform**（`platform.type='web'`）→ 数据读写走 **localStorage**，而正确移动端（MobilePlatform）数据在 **SQLite**（`chatbox.db` / `chatbox-session-meta.db`，app 私有目录）。于是：① SQLite 旧数据完全读不到（文件未删，只是不读）→ 用户看数据「全没了」；② `platform.type === 'mobile'` 判定失效 → 设置菜单 Keyboard Shortcuts 入口错误显示。
+**证据（APK 产物直查）**：基底 `fork版_202610061721.apk` 主 bundle 含 `const CHATBOX_BUILD_TARGET="mobile_app"`；V17.1/V17.2/V17.3 均含 `const CHATBOX_BUILD_TARGET="unknown"`。正确命令一直存在：`package.json:64 "mobile:sync:android": "cross-env CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android pnpm run build:renderer && pnpm run delete-sourcemaps && npx cap sync android"`——未按它执行。
+**后果**：三版交付（V17.1/V17.2/V17.3）全部以 WebPlatform 运行；V17.1 验收只看功能未触发数据检查，错误被带进后续版本。
+**修复**：renderer 构建必须走 `pnpm run mobile:sync:android`（注入 `CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android`）；**交付前六查新增第 6 项**：`unzip -p <apk> assets/public/js/index.*.js | grep -c 'CHATBOX_BUILD_TARGET="mobile_app"'` 必须 ≥1。
+**教训**：**壳层五查（zip/对齐/签名/manifest/.so）全部通过 ≠ JS 产物平台正确**——平台判定常量是构建时注入的，必须验证产物而非仅验证壳；移动端交付必须走仓库已定义的移动端构建命令，禁止裸 electron-vite build。
+
 ### 5. NO_MINIFY 的交付副作用
 
 **现象**：为降沙箱负载关闭 JS 压缩，主 bundle 15.3MB，APK 体积 24.7MB→46MB。
@@ -87,33 +97,47 @@
 1. **单进程构建**：句柄丢失 ≠ 进程死亡；先查进程再决定；不删运行中产物；不重复启动
 2. **重打包铁律**：非网页条目从基底字节级复制；`.so` / `dexopt` 必须 STORED；**网页产物路径 = `assets/public/`**（不是 `public/`）：剔除基底 `assets/public/*`、写入 `assets/public/`，交付前验证 APK 内该路径含新功能特征串
 3. **密钥唯一**：`v48-keys/签名密钥/chatbox-mod.keystore`（指纹 aa46319b85）；用前 keytool 验指纹
-4. **交付前五查**：
+4. **移动端构建命令（V17.3 新增）**：交付 Android APK 的 renderer 构建**必须**用 `pnpm run mobile:sync:android`（内部注入 `CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android`）；**禁止裸 `electron-vite build` / 裸 `npx cross-env ... electron-vite build` 交付移动端**——不注入 target 时产物 `CHATBOX_BUILD_TARGET="unknown"`，运行时走 WebPlatform→localStorage，读不到 SQLite 旧数据（用户数据「消失」）且平台判定错乱（移动端应隐藏入口错误显示）
+5. **交付前六查**：
    - `unzip -t <apk>` → zip 完整性
    - `zipalign -c -p 4 <apk>` → 对齐（需在签名后验证）
    - `apksigner verify <apk>` → 签名有效
    - `aapt dump badging <apk>` → manifest 可解析、native-code 完整
    - `unzip -v <apk> | grep .so` → 全部 Stored
-5. **体积默认压缩**：常规构建开 minify；NO_MINIFY 仅应急并尽快补压缩版
-6. **环境纪律**：构建前查残留进程与负载；错峰运行（renderer 与 gradle 绝不并发）；沙箱重启后先 `gradlew help` 预热验缓存
+   - **`unzip -p <apk> assets/public/js/index.*.js | grep -c 'CHATBOX_BUILD_TARGET="mobile_app"'` → 必须 ≥1**（V17.3 新增：构建 target 正确注入，防数据层错位）
+6. **体积默认压缩**：常规构建开 minify；NO_MINIFY 仅应急并尽快补压缩版
+7. **环境纪律**：构建前查残留进程与负载；错峰运行（renderer 与 gradle 绝不并发）；沙箱重启后先 `gradlew help` 预热验缓存
+
+### 正确构建命令（V17.3 新增，替代裸 electron-vite build）
+
+```bash
+# 移动端 Android（唯一正确入口）：构建 + 删 sourcemap + cap sync 一步完成
+pnpm run mobile:sync:android
+# 等价手拆：
+#   cross-env CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android pnpm run build:renderer
+#   pnpm run delete-sourcemaps
+#   npx cap sync android
+```
 
 ---
 
 ## 四、重打包参考命令
 
 ```bash
-# 非 public 字节级复制 + public 替换（Python）
+# 非 public 字节级复制 + assets/public 替换（Python）
+# 注意：网页产物路径是 assets/public/（Android 原生 assets），不是 public/！
 python3 - <<'EOF'
 import zipfile, os
 with zipfile.ZipFile(base_apk, 'r') as src, zipfile.ZipFile(out, 'w') as dst:
     for info in src.infolist():
         fn = info.filename
-        if fn.startswith('public/') or fn.startswith('META-INF/') or fn.endswith('/'):
+        if fn.startswith('assets/public/') or fn.startswith('META-INF/') or fn.endswith('/'):
             continue
         dst.writestr(info, src.read(fn))  # 保留全部 entry 属性
     for root, dirs, files in os.walk(newpub):
         for f in files:
             full = os.path.join(root, f)
-            rel = 'public/' + os.path.relpath(full, newpub).replace(os.sep, '/')
+            rel = 'assets/public/' + os.path.relpath(full, newpub).replace(os.sep, '/')
             dst.write(full, rel, compress_type=zipfile.ZIP_DEFLATED)
 EOF
 
