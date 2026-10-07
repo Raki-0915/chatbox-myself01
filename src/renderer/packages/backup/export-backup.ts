@@ -4,6 +4,7 @@ import type { StreamingExportResult } from '@/platform/interfaces'
 import {
   BACKUP_COPILOTS_PATH,
   BACKUP_MANIFEST_PATH,
+  BACKUP_MOD_PATH,
   BACKUP_SESSION_SETTINGS_PATH,
   BACKUP_SETTINGS_PATH,
   backupEntryByteLimit,
@@ -228,6 +229,36 @@ export async function exportBackupArchive(options: BackupExportOptions): Promise
         data.copilots = descriptor
         yield archive
       }
+    }
+
+    // Chatbox Mod 创作数据（世界书/人物卡/文件夹/事件/原著库/存档点/书签/Mod 设置/日志/备份）
+    if (options.exportItems.includes('mod')) {
+      const MOD_KEYS = [
+        'mod.world-books',
+        'mod.character-cards',
+        'mod.folders',
+        'mod.backups',
+        'mod.bookmarks',
+        'mod.novel-books',
+        'mod.settings',
+        'mod.log',
+      ]
+      const modPayload: Record<string, unknown> = {
+        format: 'chatbox-mod-export',
+        version: 1,
+        exportedAt: exportedAt.toISOString(),
+      }
+      for (const key of MOD_KEYS) {
+        try {
+          const value = await options.storage.getItem<unknown>(key, null)
+          if (value !== null && value !== undefined) modPayload[key] = value
+        } catch {
+          // 单键读取失败不阻断整个备份
+        }
+      }
+      const { archive, descriptor } = await jsonEntry(BACKUP_MOD_PATH, modPayload)
+      data.mod = descriptor
+      yield archive
     }
 
     // The session-settings entry is a generic storage key-value map. It also

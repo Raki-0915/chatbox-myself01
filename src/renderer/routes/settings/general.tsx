@@ -648,6 +648,7 @@ const ImportExportDataSection = () => {
     ExportDataItem.Setting,
     ExportDataItem.Conversations,
     ExportDataItem.Copilot,
+    ExportDataItem.Mod,
   ])
 
   const isLoading = isExporting || isImporting || importRequiresRestart
@@ -882,6 +883,7 @@ const ImportExportDataSection = () => {
           { label: t('API KEY & License'), value: ExportDataItem.Key },
           { label: t('Chat History'), value: ExportDataItem.Conversations },
           { label: t('My Copilots'), value: ExportDataItem.Copilot },
+          { label: '创作数据（世界书/人物卡/小说库）', value: ExportDataItem.Mod },
         ].map(({ label, value }) => (
           <Checkbox
             key={value}
@@ -995,6 +997,7 @@ enum ExportDataItem {
   Key = 'key',
   Conversations = 'conversations',
   Copilot = 'copilot',
+  Mod = 'mod',
 }
 
 const ExportLogsSection = () => {

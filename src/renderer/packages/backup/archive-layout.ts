@@ -5,6 +5,7 @@ export const BACKUP_MANIFEST_PATH = 'manifest.json'
 export const BACKUP_SETTINGS_PATH = 'settings.json'
 export const BACKUP_COPILOTS_PATH = 'copilots.json'
 export const BACKUP_SESSION_SETTINGS_PATH = 'session-settings.json'
+export const BACKUP_MOD_PATH = 'mod-data.json'
 
 export function isBackupSessionPath(path: string): boolean {
   return /^sessions\/[^/]+\/session\.json$/.test(path)
@@ -20,6 +21,7 @@ export function isBackupJsonPath(path: string): boolean {
     path === BACKUP_SETTINGS_PATH ||
     path === BACKUP_COPILOTS_PATH ||
     path === BACKUP_SESSION_SETTINGS_PATH ||
+    path === BACKUP_MOD_PATH ||
     isBackupSessionPath(path)
   )
 }

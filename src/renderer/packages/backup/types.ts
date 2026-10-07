@@ -10,7 +10,7 @@ const BackupIdentifierSchema = z.string().min(1)
 const BackupPathSchema = z.string().min(1).max(4096)
 const BackupStorageKeySchema = z.string().min(1)
 
-export const BackupExportItemSchema = z.enum(['setting', 'key', 'conversations', 'copilot'])
+export const BackupExportItemSchema = z.enum(['setting', 'key', 'conversations', 'copilot', 'mod'])
 export type BackupExportItem = z.infer<typeof BackupExportItemSchema>
 
 export const BackupChecksumSchema = z.object({
@@ -82,6 +82,8 @@ export const BackupManifestSchema = z.object({
     // allowlist, so unknown keys are ignored and both directions stay
     // compatible without a new archive entry or format bump.
     sessionSettings: BackupJsonEntrySchema.optional(),
+    // Chatbox Mod 创作数据（世界书/人物卡/文件夹/事件/原著库/存档点/书签/Mod 设置）
+    mod: BackupJsonEntrySchema.optional(),
   }),
   sessions: z.array(BackupSessionEntrySchema).max(50_000),
   resources: z.array(BackupResourceEntrySchema).max(50_000),

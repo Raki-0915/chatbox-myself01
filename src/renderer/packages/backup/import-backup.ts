@@ -322,6 +322,7 @@ function validateManifestEntries(manifest: BackupManifest, stagedEntries: Map<st
     manifest.data.settings,
     manifest.data.copilots,
     manifest.data.sessionSettings,
+    manifest.data.mod,
     ...manifest.sessions,
     ...manifest.resources,
   ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
@@ -416,6 +417,17 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
   const stagedEntries = new Map<string, StagedEntry>()
   const tempStoreKeys: string[] = []
   const tempBlobKeys: string[] = []
+  // Chatbox Mod 创作数据键（导出/导入两侧保持一致；存于模块私有命名空间，避免与官方键冲突）
+  const MOD_BACKUP_KEYS = [
+    'mod.world-books',
+    'mod.character-cards',
+    'mod.folders',
+    'mod.backups',
+    'mod.bookmarks',
+    'mod.novel-books',
+    'mod.settings',
+    'mod.log',
+  ] as const
   const previousValues: PreviousValue[] = []
   const changedMetaIds: string[] = []
   const previousMeta = new Map<string, Awaited<ReturnType<BackupMetaStorage['getById']>>>()
@@ -523,6 +535,7 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
       ...manifest.sessions.map((session) => backupSessionStorageKey(session.id)),
       ...(manifest.data.settings ? [BackupStorageKey.Settings] : []),
       ...(manifest.data.copilots ? [BackupStorageKey.MyCopilots] : []),
+      ...(manifest.data.mod ? MOD_BACKUP_KEYS : []),
       ...(manifest.data.sessionSettings
         ? [
             BackupStorageKey.ChatSessionSettings,
@@ -627,6 +640,15 @@ export async function importBackupArchive(file: File, options: BackupImportOptio
         ...COPILOT_BACKUP_KEYS,
       ]) {
         if (key in sessionSettings) await options.storage.setItemNow(key, sessionSettings[key])
+      }
+    }
+    // Chatbox Mod 创作数据（世界书/人物卡/文件夹/事件/原著库/存档点/书签/Mod 设置/日志/备份）
+    if (manifest.data.mod) {
+      const value = stagedEntries.get(manifest.data.mod.path)?.value
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid mod data entry')
+      const modData = value as Record<string, unknown>
+      for (const key of MOD_BACKUP_KEYS) {
+        if (key in modData) await options.storage.setItemNow(key, modData[key])
       }
     }
 

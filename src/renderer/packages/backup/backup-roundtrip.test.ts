@@ -206,6 +206,68 @@ describe('ZIP backup round trip', () => {
     expect(nativeRandomUuid).not.toHaveBeenCalled()
   })
 
+  it('round-trips Chatbox Mod creative data (world books / character cards / novel library)', async () => {
+    const MOD_KEYS = [
+      'mod.world-books',
+      'mod.character-cards',
+      'mod.folders',
+      'mod.backups',
+      'mod.bookmarks',
+      'mod.novel-books',
+      'mod.settings',
+      'mod.log',
+    ]
+    const source = new MemoryStorage()
+    const sourceMeta = new MemoryMetaStorage()
+    source.values.set('mod.world-books', [
+      { id: 'wb1', name: '加勒比世界', content: '海图与传说', enabled: true, keywords: ['海图'] },
+    ])
+    source.values.set('mod.character-cards', [
+      { id: 'cc1', name: '罗素', description: '落魄船长', enabled: true, folderId: 'f1' },
+    ])
+    source.values.set('mod.folders', [{ id: 'f1', name: '主角团' }])
+    source.values.set('mod.novel-books', [
+      { id: 'nb1', title: '女帝太监最风流', chapters: [{ no: 1, title: '起航', content: '正文……' }] },
+    ])
+    source.values.set('mod.bookmarks', [{ id: 'bm1', novelBookId: 'nb1', chapterNo: 1 }])
+    source.values.set('mod.settings', { updateConfirm: true, dedupSensitivity: 'standard' })
+    source.values.set('mod.backups', [])
+    source.values.set('mod.log', [])
+
+    const chunks: Uint8Array[] = []
+    const exported = await exportBackupArchive({
+      exportItems: ['mod'],
+      includeKeys: false,
+      exportedAt: new Date('2026-10-07T00:00:00.000Z'),
+      storage: source,
+      metaStorage: sourceMeta,
+      application: { version: '1.23.5', platform: 'test' },
+      writeArchive: async (dataCallback) => {
+        for await (const chunk of dataCallback()) chunks.push(chunk)
+        return { boundedMemory: true }
+      },
+    })
+    expect(exported.manifest.data.mod).toBeDefined()
+    expect(exported.manifest.data.mod?.path).toBe('mod-data.json')
+    const zipEntries = unzipSync(Uint8Array.from(combine(chunks)))
+    expect(zipEntries['mod-data.json']).toBeDefined()
+    const payload = JSON.parse(new TextDecoder().decode(zipEntries['mod-data.json'])) as Record<string, unknown>
+    expect(payload.format).toBe('chatbox-mod-export')
+    for (const key of MOD_KEYS) expect(key in payload).toBe(true)
+
+    const destination = new MemoryStorage()
+    const destinationMeta = new MemoryMetaStorage()
+    const result = await importBackupArchive(
+      new File([Uint8Array.from(combine(chunks)).buffer], 'backup.zip', { type: 'application/zip' }),
+      { storage: destination, metaStorage: destinationMeta }
+    )
+    expect(result.restoredSessionCount).toBe(0)
+    for (const key of MOD_KEYS) {
+      expect(destination.values.has(key)).toBe(true)
+      expect(JSON.stringify(destination.values.get(key))).toBe(JSON.stringify(source.values.get(key)))
+    }
+  })
+
   it('rebases conversation-only snapshots without replacing frozen memories', async () => {
     const frozenSnapshot = {
       version: 1,
