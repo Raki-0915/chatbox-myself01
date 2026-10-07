@@ -22,6 +22,7 @@ export const DEFAULT_MOD_SETTINGS: ModSettings = {
   ccInjectionLimit: 6000,
   siliconflowApiKey: '',
   chatMode: 'creation',
+  analysisRange: { mode: 'recent' },
 }
 
 /* ======================== Jotai atoms ======================== */

@@ -63,20 +63,34 @@ function resultText(r: { contentParts?: unknown[]; content?: unknown }): string 
   return typeof r.content === 'string' ? r.content : ''
 }
 
-/** 读取会话最近 N 条消息文本 */
-async function getRecentDialogText(sid: string, n: number): Promise<string> {
+/** 按分析范围读取会话消息文本（v2.1 A）：最近 N 条（锚定数量）或指定区间（锚定 msgId，删消息自动跳过） */
+async function getDialogTextByRange(
+  sid: string,
+  range: { mode: 'recent' } | { mode: 'range'; label: string; msgIds: string[] } | undefined,
+  n: number
+): Promise<{ text: string; count: number; missing: number }> {
   try {
     const session = await rendererApplication.sessionQueryBridge.getSession(sid)
-    if (!session?.messages?.length) return ''
-    return session.messages
-      .slice(-n)
-      .map((m) => textOf(m.contentParts ?? []))
-      .filter(Boolean)
-      .join('\n')
-      .slice(0, 8000)
+    if (!session?.messages?.length) return { text: '', count: 0, missing: 0 }
+    let picked: Array<{ id?: string; contentParts?: unknown[] }>
+    if (range?.mode === 'range' && range.msgIds.length > 0) {
+      const idSet = new Set(range.msgIds)
+      picked = session.messages.filter((m) => idSet.has(m.id ?? ''))
+      return {
+        text: picked.map((m) => textOf(m.contentParts ?? [])).filter(Boolean).join('\n').slice(0, 8000),
+        count: picked.length,
+        missing: idSet.size - picked.length,
+      }
+    }
+    picked = session.messages.slice(-n)
+    return {
+      text: picked.map((m) => textOf(m.contentParts ?? [])).filter(Boolean).join('\n').slice(0, 8000),
+      count: picked.length,
+      missing: 0,
+    }
   } catch (e) {
-    log.warn('getRecentDialogText failed', e)
-    return ''
+    log.warn('getDialogTextByRange failed', e)
+    return { text: '', count: 0, missing: 0 }
   }
 }
 
@@ -184,7 +198,7 @@ export type { AutoUpdateDiff }
  */
 export async function maybeAutoUpdateWorldBooks(
   sid: string,
-  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null> } = {}
+  opts: { fixedTarget?: string; force?: boolean; onConfirm?: () => Promise<boolean>; onPreview?: (diff: AutoUpdateDiff) => Promise<AutoUpdateDiff | null>; rangeMsgIds?: string[] } = {}
 ): Promise<AutoUpdateResult> {
   const target = opts.fixedTarget ?? sid
   if (updating && !opts.force) return { ok: false, error: '已有更新任务进行中', wbAdd: 0, wbUpdate: 0, wbRemove: 0, ccAdd: 0, ccUpdate: 0, ccRemove: 0, eventsAdd: 0 }
@@ -201,7 +215,12 @@ export async function maybeAutoUpdateWorldBooks(
     const loadedWb = allWb.filter((w) => binding.worldBookIds.includes(w.id) && w.enabled !== false)
     const loadedCc = allCc.filter((c) => binding.characterCardIds.includes(c.id) && c.enabled !== false)
 
-    const dialogText = await getRecentDialogText(target, settings.recentMessages || DEFAULT_MOD_SETTINGS.recentMessages)
+    // 手动触发（消息多选「用这段更新」）优先于设置的分析范围；手动区间同样锚定 msgId
+    const manualRange = opts.rangeMsgIds && opts.rangeMsgIds.length > 0
+      ? { mode: 'range' as const, label: `手动选中 ${opts.rangeMsgIds.length} 条`, msgIds: opts.rangeMsgIds }
+      : undefined
+    const rangeRead = await getDialogTextByRange(target, manualRange ?? settings.analysisRange, settings.recentMessages || DEFAULT_MOD_SETTINGS.recentMessages)
+    const dialogText = rangeRead.text
 
     // 没有可分析的内容就直接跳过
     if (!dialogText.trim() && loadedWb.length === 0 && loadedCc.length === 0) {
@@ -237,6 +256,11 @@ export async function maybeAutoUpdateWorldBooks(
     let diff = parseDiff(raw)
     if (!diff) {
       throw new Error('模型输出无法解析为 JSON 差异')
+    }
+    // 指定区间（含手动触发）且已删除部分消息 → 预览提示实际分析条数（v2.1 防漂移）
+    const activeRange = manualRange ?? settings.analysisRange
+    if (activeRange?.mode === 'range' && rangeRead.missing > 0) {
+      diff = { ...diff, rangeNote: `区间「${activeRange.label}」内 ${rangeRead.missing} 条消息已删除，本次实际分析 ${rangeRead.count} 条` }
     }
 
     // 按名称索引（remove 保护与增改应用共用）

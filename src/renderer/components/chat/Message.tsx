@@ -157,6 +157,8 @@ interface Props {
   onToggleBookmark?: (messageId: string) => void
   /** Mod：进入多选删除模式 */
   onEnterMultiSelect?: () => void
+  /** Mod：消息序号（第 N 条，纯显示；配合「指定区间」填写与手动多选触发，v2.1 C） */
+  msgIndex?: number
 }
 
 const BackgroundTaskNotificationUI: FC<{ task: MessageBackgroundTask; className?: string }> = ({ task, className }) => {
@@ -211,6 +213,7 @@ const _Message: FC<Props> = (props) => {
     onToggleSelect,
     onToggleBookmark,
     onEnterMultiSelect,
+    msgIndex,
   } = props
 
   const { t } = useTranslation()
@@ -533,6 +536,8 @@ const _Message: FC<Props> = (props) => {
   // Units like "tokens", "words", "tkn", "s" are intentionally kept as hardcoded English
   // because they are technical/universal abbreviations that remain readable across all locales.
   const tips: { label: string; tooltip?: string }[] = []
+  // Mod：消息序号置顶显示（纯显示，v2.1 C）
+  if (typeof msgIndex === 'number' && msgIndex > 0) tips.push({ label: `#${msgIndex}` })
   if (props.sessionType === 'chat' || !props.sessionType) {
     if (showModelName && props.msg.role === 'assistant') {
       tips.push({ label: props.msg.model || 'unknown', tooltip: t('Model') as string })

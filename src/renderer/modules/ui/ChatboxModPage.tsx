@@ -66,6 +66,7 @@ import type { CharacterCard, ModFolder, WorldBookEntry } from '../types'
 import { addBindingItems, clearBinding, getBinding, listSessionsMeta, replaceBinding, setBinding } from '../session'
 import type { SessionMetaLike } from '../session'
 import { forceUnlockAutoUpdate, isAutoUpdateRunning, maybeAutoUpdateWorldBooks } from '../auto-update'
+import { rendererApplication } from '@/app/renderer-application'
 import { buildExportPayload, importModData } from '../export'
 import { ExportModal, type ExportModalConfig } from './ExportModal'
 import {
@@ -78,6 +79,7 @@ import {
   type TavernCardData,
 } from '../png-character-import'
 import { toggleFrozen } from '../frozen-text'
+import { mergeEvents, canMerge } from '../event-dedup'
 import { splitChapters, v27Continue, v283EnsureSession, v283GenOptions, v283PushChapter, v283Rewrite } from '../novel'
 import type { RewritePlan } from '../novel'
 import { importNovelBook, novelBooksAtom, parseNovelImport, removeNovelBook, upsertRewriteNode } from '../novel-rewrite'
@@ -1428,6 +1430,45 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
   const [addingEvent, setAddingEvent] = useState(false)
   const [newEventContent, setNewEventContent] = useState('')
   const [newEventKws, setNewEventKws] = useState('')
+  // 手动合并（v2.2 方案 D）：选择模式 + 多选 + 合并预览（可编辑） + 执行（合并前快照可回滚）
+  const [mergeMode, setMergeMode] = useState(false)
+  const [selMerge, setSelMerge] = useState<Set<string>>(new Set())
+  const [mergeDraft, setMergeDraft] = useState<null | { ids: string[]; content: string; keywords: string[] }>(null)
+  const mergeable = events.filter((e) => !e.frozen && canMerge({ id: e.id, content: e.content, keywords: e.keywords }))
+  const openMergePreview = () => {
+    const picked = events.filter((e) => selMerge.has(e.id))
+    if (picked.length < 2) return
+    const ordered = picked.slice().sort((a, b) => (a.t ?? 0) - (b.t ?? 0))
+    const merged = mergeEvents(ordered[0], ordered.slice(1), Date.now())
+    setMergeDraft({ ids: picked.map((e) => e.id), content: merged.content, keywords: merged.keywords })
+  }
+  const doMergeEvents = () => {
+    if (!mergeDraft) return
+    const picked = events.filter((e) => mergeDraft.ids.includes(e.id)).sort((a, b) => (a.t ?? 0) - (b.t ?? 0))
+    const target = picked[0]
+    const sources = picked.slice(1)
+    const merged = mergeEvents(target, sources, Date.now())
+    // 合并前快照进版本历史（可回滚；格式与 store.snapshotCard 一致）
+    const now = Date.now()
+    const ver = (card.versionHistory.at(-1)?.version ?? 0) + 1
+    const { versionHistory: _vh, ...rest } = card
+    const history = [...card.versionHistory, { version: ver, timestamp: now, snapshot: JSON.stringify(rest) }].slice(-20)
+    const newEvents = events
+      .filter((e) => !sources.some((s) => s.id === e.id))
+      .map((e) => (e.id === target.id ? { ...merged, id: target.id, roleName: target.roleName ?? card.name } : e))
+    onChange({ ...card, associatedEvents: newEvents, versionHistory: history })
+    setMergeDraft(null)
+    setMergeMode(false)
+    setSelMerge(new Set())
+  }
+  const toggleMergeSel = (id: string) => {
+    setSelMerge((s) => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
   const fields = [
     { field: 'appearance', label: '外貌', content: card.appearance },
     { field: 'distinguishingFeatures', label: '显著特征', content: card.distinguishingFeatures },
@@ -1513,30 +1554,63 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         </Group>
       ))}
       <Button size="compact-xs" variant="subtle" onClick={() => set({ customAttributes: [...card.customAttributes, { key: '', value: '' }] })}>+ 添加属性</Button>
-      {/* 关联事件区（角色知识库：剧情进展累积、关键词触发注入、可单条冻结） */}
+      {/* 关联事件区（角色知识库：剧情进展累积、关键词触发注入、可单条冻结、可手动合并） */}
       <Divider label="角色知识库（CharacterBook）" labelPosition="left" />
-      <Text size="xs" c="dimmed">角色专属事件与记忆，跟随人物卡；勾选关键词触发后，对话命中才注入上下文。</Text>
+      <Text size="xs" c="dimmed">角色专属事件与记忆，跟随人物卡；勾选关键词触发后，对话命中才注入上下文。重复条目可在「合并」中选择多条合成一条（冻结条目不可参与）。</Text>
+      {mergeMode && (
+        <Flex align="center" gap={6} style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '4px 8px' }}>
+          <Text size="xs" fw={600} c="blue">选择要合并的事件（≥2 条；冻结条目灰显不可选）</Text>
+          <Text size="xs" c="dimmed" style={{ flex: 1, textAlign: 'right' }}>{selMerge.size} 条已选</Text>
+        </Flex>
+      )}
       {events.length === 0 ? (
         <Box style={{ border: '1px dashed #d0d0d0', borderRadius: 6, padding: '10px 12px', background: '#fafafa' }}>
           <Text size="xs" c="dimmed">暂无条目。角色的个人事件（剧情进展、经历）建议放这里，而不是全局世界书。</Text>
         </Box>
       ) : (
         <Stack gap={4}>
-          {events.slice().reverse().map((e) => (
-            <Box key={e.id} style={{ border: e.frozen ? '1px solid #f0c0c0' : '1px solid #e0e0e0', borderRadius: 4, padding: '4px 6px', background: e.frozen ? '#fff4f2' : '#fff' }}>
+          {events.slice().reverse().map((e) => {
+            const frozen = !!e.frozen
+            const sel = selMerge.has(e.id)
+            const dim = mergeMode && frozen
+            return (
+            <Box
+              key={e.id}
+              onClick={mergeMode && !frozen ? () => toggleMergeSel(e.id) : undefined}
+              style={{
+                border: mergeMode && frozen ? '1px solid #eee' : mergeMode && sel ? '1.5px solid #2563eb' : '1px solid #e0e0e0',
+                borderRadius: 4, padding: '4px 6px',
+                background: mergeMode && frozen ? '#f7f7f7' : mergeMode && sel ? '#eff6ff' : frozen ? '#fff4f2' : '#fff',
+                cursor: mergeMode && !frozen ? 'pointer' : 'default',
+                opacity: dim ? 0.6 : 1,
+              }}
+            >
               <Flex justify="space-between" align="center" gap="xs">
+                {mergeMode && !frozen ? <Checkbox size="xs" checked={sel} onChange={() => toggleMergeSel(e.id)} style={{ pointerEvents: 'none' }} /> : null}
                 <Text size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>{e.roleName}</Text>
                 <Text size="xs" c="dimmed">{new Date(e.t).toLocaleString()}</Text>
-                <ActionIcon size="xs" color={e.frozen ? 'red' : 'gray'} variant="subtle" title={e.frozen ? '已冻结（AI 不改）' : '未冻结'} onClick={() => setEvents(events.map((x) => (x.id === e.id ? { ...x, frozen: !x.frozen } : x)))}>{e.frozen ? '🔒' : '🔓'}</ActionIcon>
+                {!mergeMode ? (
+                  <>
+                <ActionIcon size="xs" color={frozen ? 'red' : 'gray'} variant="subtle" title={frozen ? '已冻结（AI 不改）' : '未冻结'} onClick={() => setEvents(events.map((x) => (x.id === e.id ? { ...x, frozen: !x.frozen } : x)))}>{frozen ? '🔒' : '🔓'}</ActionIcon>
                 <ActionIcon size="xs" color="red" variant="subtle" onClick={() => setEvents(events.filter((x) => x.id !== e.id))}>✕</ActionIcon>
+                  </>
+                ) : null}
               </Flex>
               <Text size="xs" style={{ whiteSpace: 'pre-wrap' }}>{e.content}</Text>
               {e.keywords && e.keywords.length > 0 ? <Text size="xs" c="blue">触发词: {e.keywords.join(' / ')}</Text> : null}
             </Box>
-          ))}
+            )
+          })}
         </Stack>
       )}
-      {addingEvent ? (
+      {mergeMode ? (
+        <Group justify="space-between" align="center">
+          <Button size="compact-xs" variant="subtle" onClick={() => { setMergeMode(false); setSelMerge(new Set()) }}>取消合并</Button>
+          <Button size="compact-xs" color="blue" disabled={selMerge.size < 2} onClick={openMergePreview}>
+            合并选中{selMerge.size > 0 ? `（${selMerge.size}）` : ''}
+          </Button>
+        </Group>
+      ) : addingEvent ? (
         <>
           <Textarea size="xs" autosize minRows={2} placeholder="事件内容（一句话剧情进展）" value={newEventContent} onChange={(ev) => setNewEventContent(ev.currentTarget.value)} />
           <TextInput size="xs" placeholder="触发关键词（逗号分隔，对话命中才注入上下文）" value={newEventKws} onChange={(ev) => setNewEventKws(ev.currentTarget.value)} />
@@ -1560,7 +1634,12 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
         </>
       ) : (
         <Group justify="space-between" align="center">
-          <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(true)}>+ 添加条目</Button>
+          <Group gap={4}>
+            <Button size="compact-xs" variant="subtle" onClick={() => setAddingEvent(true)}>+ 添加条目</Button>
+            {events.length >= 2 && mergeable.length >= 2 ? (
+              <Button size="compact-xs" variant="subtle" color="blue" onClick={() => { setMergeMode(true); setSelMerge(new Set()) }}>合并</Button>
+            ) : null}
+          </Group>
           <Switch
             label="启用（注入到对话上下文）"
             checked={card.eventInjectionEnabled !== false}
@@ -1597,6 +1676,30 @@ function CharacterCardEditor({ card, onChange, folders }: { card: CharacterCard;
       )}
         </>
       )}
+      {/* 合并预览弹窗：合并后文本可编辑、触发词可改；确认前自动快照（可回滚） */}
+      <Modal opened={mergeDraft !== null} onClose={() => setMergeDraft(null)} title="合并事件预览" size="lg" centered>
+        {mergeDraft && (
+          <Stack gap="sm">
+            <Text size="xs" c="dimmed">将 {mergeDraft.ids.length} 条事件合并为 1 条（内容按时间顺序拼接、重复句子自动去重、触发词并集）。确认后合并前的状态会自动存为版本历史，可随时回滚。</Text>
+            <Textarea
+              size="xs" autosize minRows={4}
+              label="合并后内容"
+              value={mergeDraft.content}
+              onChange={(ev) => setMergeDraft({ ...mergeDraft, content: ev.currentTarget.value })}
+            />
+            <TextInput
+              size="xs"
+              label="触发词（逗号分隔，上限 8 个）"
+              value={mergeDraft.keywords.join('，')}
+              onChange={(ev) => setMergeDraft({ ...mergeDraft, keywords: ev.currentTarget.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 8) })}
+            />
+            <Group justify="flex-end" gap="sm">
+              <Button size="xs" variant="subtle" onClick={() => setMergeDraft(null)}>取消</Button>
+              <Button size="xs" color="chatbox-brand" onClick={doMergeEvents}>确认合并</Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   )
 }
@@ -1666,7 +1769,7 @@ function AutoUpdateTab() {
   const [lastResult, setLastResult] = useState<string>('')
   const sessionId = useAtomValue(currentSessionIdAtom)
   // 分析消息数：是否处于快捷档位 / 是否点了「自定义」
-  const isPresetRc = ['8', '16', '30', '60'].includes(String(settings.recentMessages))
+  const isPresetRc = ['2', '4', '8', '16', '30', '60'].includes(String(settings.recentMessages))
   const [showCustomRc, setShowCustomRc] = useState(false)
   // 自定义输入草稿（本地编辑，失焦/回车才校验写回，允许自由删改）
   const [rcDraft, setRcDraft] = useState<string>(String(settings.recentMessages))
@@ -1674,13 +1777,37 @@ function AutoUpdateTab() {
     setRcDraft(String(settings.recentMessages))
   }, [settings.recentMessages])
   const commitRc = () => {
-    const n = Math.min(100, Math.max(4, Number(rcDraft)))
-    if (!Number.isFinite(n) || n < 4 || n > 100) {
+    const n = Math.min(100, Math.max(2, Number(rcDraft)))
+    if (!Number.isFinite(n) || n < 2 || n > 100) {
       setRcDraft(String(settings.recentMessages))
       return
     }
     setRcDraft(String(n))
     void updateModSettings({ recentMessages: n })
+  }
+  // 分析范围（v2.1 A）：最近 N 条 | 指定区间（序号输入 → msgId 锚定）
+  const range = settings.analysisRange ?? { mode: 'recent' as const }
+  const [rangeDraft, setRangeDraft] = useState<string>('')
+  const rangeToMsgIds = async (a: number, b: number): Promise<{ ids: string[]; actual: number }> => {
+    if (!sessionId || sessionId === 'new') return { ids: [], actual: 0 }
+    try {
+      const session = await rendererApplication.sessionQueryBridge.getSession(sessionId)
+      const msgs = (session?.messages ?? []) as Array<{ id?: unknown }>
+      const picked = msgs.slice(a - 1, b).map((m) => String(m.id ?? '')).filter(Boolean)
+      return { ids: picked, actual: picked.length }
+    } catch {
+      return { ids: [], actual: 0 }
+    }
+  }
+  const commitRange = async () => {
+    if (!sessionId || sessionId === 'new') return
+    const m = /^\s*(\d+)\s*[~～-]\s*(\d+)\s*$/.exec(rangeDraft)
+    if (!m) return
+    const a = Number(m[1]); const b = Number(m[2])
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 1 || b < a) return
+    const { ids, actual } = await rangeToMsgIds(a, b)
+    if (ids.length === 0) return
+    void updateModSettings({ analysisRange: { mode: 'range', label: `${a}~${b}`, msgIds: ids } })
   }
 
   const runNow = async () => {
@@ -1726,7 +1853,7 @@ function AutoUpdateTab() {
       <Box>
         <Text size="sm" fw={600}>分析最近消息数</Text>
         <Text size="xs" c="dimmed" mb={6}>
-          自动更新分析时取最近多少条消息（用户与 AI 回复都计入）。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 8），觉得漏更新可调大（如 30/60）。
+          自动更新分析时取最近多少条消息（用户与 AI 回复都计入）。条数越多分析越全面，但每条 AI 回复后都可能触发一次分析、弹更新预览；觉得弹窗频繁可调小（如 4/8），觉得漏更新可调大（如 30/60）。
         </Text>
         <SegmentedControl
           size="xs"
@@ -1736,21 +1863,57 @@ function AutoUpdateTab() {
             if (v === 'custom') setShowCustomRc(true)
             else { setShowCustomRc(false); void updateModSettings({ recentMessages: Number(v) || 16 }) }
           }}
-          data={[...['8', '16', '30', '60'].map((n) => ({ label: n, value: n })), { label: '自定义', value: 'custom' }]}
+          data={[...['2', '4', '8', '16', '30', '60'].map((n) => ({ label: n, value: n })), { label: '自定义', value: 'custom' }]}
         />
         {showCustomRc || !isPresetRc ? (
           <NumberInput
             mt={6}
             size="xs"
-            label="自定义分析消息数（4~100，删除或回车确认）"
+            label="自定义分析消息数（2~100，删除或回车确认）"
             value={rcDraft}
-            min={4}
+            min={2}
             max={100}
             allowDecimal={false}
             onChange={(v) => setRcDraft(v === null || v === undefined ? '' : String(v))}
             onBlur={commitRc}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRc() } }}
           />
+        ) : null}
+      </Box>
+      {/* 分析范围（v2.1 A）：最近 N 条（默认，锚定数量）| 指定区间（锚定具体消息，删消息不漂移） */}
+      <Box>
+        <Text size="sm" fw={600}>分析范围</Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          最近 N 条：每次读最新 N 条（删除后自动续上）。指定区间：按消息序号范围固定分析（如 120~180），锚定具体消息，删除不漂移；可随时切回。
+        </Text>
+        <SegmentedControl
+          size="xs"
+          fullWidth
+          value={range.mode}
+          onChange={(v) => {
+            if (v === 'recent') { void updateModSettings({ analysisRange: { mode: 'recent' } }); setRangeDraft('') }
+            else setRangeDraft(range.mode === 'range' ? range.label : '')
+          }}
+          data={[
+            { label: '最近 N 条', value: 'recent' },
+            { label: '指定区间', value: 'range' },
+          ]}
+        />
+        {range.mode === 'range' ? (
+          <Group mt={6} gap={6} align="flex-end">
+            <TextInput
+              size="xs"
+              style={{ flex: 1 }}
+              placeholder="如 120~180（填消息序号，回车确认）"
+              value={rangeDraft}
+              onChange={(e) => setRangeDraft(e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void commitRange() } }}
+            />
+            <Button size="compact-xs" variant="light" onClick={() => void commitRange()}>确认区间</Button>
+          </Group>
+        ) : null}
+        {range.mode === 'range' ? (
+          <Text size="xs" c="blue" mt={4}>当前区间：{range.label}（锚定具体消息，删除不漂移）</Text>
         ) : null}
       </Box>
       <Group>

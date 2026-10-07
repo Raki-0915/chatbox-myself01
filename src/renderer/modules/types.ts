@@ -189,6 +189,8 @@ export interface AutoUpdateDiff {
   events?: {
     append: Array<Record<string, unknown>>
   }
+  /** 分析范围提示（指定区间内部分消息已删除时的实际条数说明，v2.1 A） */
+  rangeNote?: string
 }
 
 /** 自动更新事件日志 */
@@ -226,6 +228,11 @@ export interface ModSettings {
   siliconflowApiKey?: string
   /** 移动端模式：创作模式（现有对话模式改名，浅色主题）| 聊天模式（群聊，强制深色主题） */
   chatMode?: 'creation' | 'group'
+  /**
+   * 分析范围（v2.1 A）：最近 N 条（默认，锚定数量）| 指定区间（锚定具体消息 msgId，删消息不漂移）
+   * range.label 为显示用区间文本（如「120~180」）；msgIds 为确认时翻译存储的消息 id 列表
+   */
+  analysisRange?: { mode: 'recent' } | { mode: 'range'; label: string; msgIds: string[] }
 }
 
 /** 会话装载目标 */

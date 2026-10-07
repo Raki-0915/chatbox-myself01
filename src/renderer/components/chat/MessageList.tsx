@@ -41,6 +41,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { type StateSnapshot, Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { buildMessageRenderItems, type MessageRenderItem } from '@/components/chat/message-render-items'
+import { maybeAutoUpdateWorldBooks } from '@/modules/auto-update'
 import { platformTypeAtom } from '@/hooks/useNeedRoomForWinControls'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import { useSessionLockState } from '@/hooks/useSessionLockState'
@@ -170,6 +171,21 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
       } catch {
         /* 逐条容错 */
       }
+    }
+  }, [currentSession.id, multiSelect.ids, exitMultiSelect])
+  // Mod：多选「用这段更新关联事件」——选中若干条消息，即时分析这段（不走自动防抖，msgId 锚定）
+  const onManualUpdate = useCallback(async () => {
+    const ids = [...multiSelect.ids]
+    if (!ids.length) return
+    exitMultiSelect()
+    try {
+      await maybeAutoUpdateWorldBooks(currentSession.id, {
+        force: true,
+        rangeMsgIds: ids,
+        onPreview: (diff) => NiceModal.show('mod-update-preview', { diff }),
+      })
+    } catch {
+      /* 容错：失败静默（预览/日志会记录） */
     }
   }, [currentSession.id, multiSelect.ids, exitMultiSelect])
   const bookmarkJump = useAtomValue(bookmarkJumpRequestAtom)
@@ -687,6 +703,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
                 onToggleSelect={toggleSelectMessage}
                 onToggleBookmark={(mid) => void onToggleBookmark(mid)}
                 onEnterMultiSelect={() => setMultiSelect((s) => ({ active: true, ids: s.ids }))}
+                msgIndex={currentMessageList.findIndex((m) => m.id === msg.id) + 1}
               />
             )}
           </ErrorBoundary>
@@ -833,6 +850,15 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>((props, ref) =>
                 }
               >
                 {t('全选')}
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="chatbox-brand"
+                disabled={!multiSelect.ids.size}
+                onClick={() => void onManualUpdate()}
+              >
+                {t('用这段更新')}
               </Button>
               <Button
                 size="compact-xs"

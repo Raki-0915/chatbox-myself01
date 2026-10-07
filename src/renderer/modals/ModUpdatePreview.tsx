@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react'
 import NiceModal, { useModal } from '@ebay/nice-modal-react'
 import { getDefaultStore } from 'jotai'
-import { Badge, Box, Button, Checkbox, Divider, Flex, Group, Modal, Stack, Text, Textarea } from '@mantine/core'
+import { Alert, Badge, Box, Button, Checkbox, Divider, Flex, Group, Modal, Stack, Text, Textarea } from '@mantine/core'
 import type { AutoUpdateDiff } from '../modules/auto-update'
 import { isTrivialChange } from '../modules/text-similarity'
 import { diffText, summarizeChanges, segmentForOld, segmentForNew } from '../modules/text-diff'
@@ -521,6 +521,11 @@ const ModUpdatePreview = NiceModal.create(({ diff }: { diff: AutoUpdateDiff }) =
         <Text c="dimmed" size="sm">模型未提出任何变更，无需更新。</Text>
       ) : (
         <Stack gap="md">
+          {diff.rangeNote ? (
+            <Alert variant="light" color="yellow" title="分析范围提示" px="sm" py="xs">
+              <Text size="xs">{diff.rangeNote}</Text>
+            </Alert>
+          ) : null}
           <Text size="xs" c="dimmed">
             已勾选 {selTotal}/{total} 条。更新条目会显示「旧 → 新」对比，确认旧信息没有被丢弃再勾选；删除条目为红色标注（应用前自动备份快照）。<Text span fw={600} c="orange">「仅轻微改动」条目与旧版基本一致，默认未勾选，需要应用请手动勾选。</Text>
           </Text>
