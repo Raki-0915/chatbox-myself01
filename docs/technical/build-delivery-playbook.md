@@ -112,6 +112,20 @@
 
 **教训**：① 4GiB cgroup 下 NO_MINIFY 必死，压缩版+低峰+临时去 manualChunks 是可行路径；② 产物在 `release/app/dist/renderer`；③ `delete-sourcemaps` 脚本缺失导致链中断属常态，手动同步产物即可；④ 六查 target 断言必须用 index.html 引用的精确主 bundle 名。
 
+### 4f. 残留产物误判与重复条目重打包（10-08 移动端提供商导入复盘）
+
+**背景**：交付「移动端提供商 JSON 导入」（commit `f672424`）。沙箱经历 4 次构建尝试，前两次被周期重启/限流杀掉，最终在低负载窗口前台构建 5m52s 成功。
+
+**新增四坑（铁律 8 之外）**：
+1. **残留产物误判（最危险）**：构建进程被杀后，`release/app/dist/renderer/` 可能留下**被杀前已写盘的残留产物**（`index.html`/js 齐全、构建日志无报错）——极易误判「构建成功」。验证方法：**必须用新功能特征串断言**（Python `count` 精确匹配新 testid / i18n key / placeholder），不能只看「日志无报错 + 文件存在」。本案例中残留产物 `CHATBOX_BUILD_TARGET="mobile_app"` ✅、官方字符串 ✅，但新代码字符串全部 0 命中——若直接重打包会交付一个没有新功能的 APK
+2. **重复条目重打包**：重打包脚本「先全复制基底、再追加同名新条目」→ zip 出现 **Duplicate name**（Android 安装行为不定）。正确：**跳过将被新产物覆盖的 `assets/public/*` 条目，保留基底独有文件（`cordova.js`/`cordova_plugins.js` 等），再写入新产物**，完成后验证 `Duplicate name: 无`
+3. **沙箱重启杀后台任务**：后台任务句柄在重启后消失（`No task found with ID`）；构建 ~6-11min 必须在上次重启后**窗口前段**启动（up 13min 内最稳）
+4. **构建期工具请求被限流**：渲染期所有工具请求报「沙箱当前负载较高」——**静默长等（Wait 5-10min 间隔）再探测**，高频重试只会消耗窗口
+
+**额外小教训**：查询产物前先确认当前目录（`release/` 在 `chatbox-fork/` 子目录，父目录查询误报「产物消失」）。
+
+**教训**：① 构建完成后**立即**断言新功能特征串（防残留产物误判）；② 重打包跳过被覆盖条目（防重复名）；③ grep 前缀匹配会误报（`Import Provider Config` 会命中 `Import Provider Configuration`），用 Python 精确 count；④ 低峰启动 + 静默等待是唯一可靠节奏。
+
 ---
 
 ## 三、固化纪律（铁律）
