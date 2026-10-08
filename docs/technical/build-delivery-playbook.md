@@ -90,6 +90,28 @@
 **影响**：用户网络仅 27-30KB/s，大文件下载损坏概率显著上升（曾误判为网络问题）。
 **教训**：降负载手段要考虑交付副作用；NO_MINIFY 仅应急，**交付后应补压缩版**。
 
+### 4e. 沙箱 4GiB 内存 cgroup 下的构建失败与成功模式（10-08 重建备份扩展复盘）
+
+**背景**：用户裁决作废 V17 全线后，要求在基底 `fork版_202610061721.apk` 上重做「备份扩展」。重建时沙箱 cgroup 内存上限 `memory.max=4294967296`（4GiB），容器约每 20-66 分钟周期重启。
+
+**失败模式（前 6 次尝试）**：
+1. `CHATBOX_NO_MINIFY=1`：转译/渲染阶段内存峰值 **3968MB 撞 4GiB 线**被 cgroup OOM 杀（进程无声消失、无内核 oom 日志、load 飙到 14+ thrash）——NO_MINIFY 大 bundle 写盘内存峰值最高，**此模式下必死**
+2. 默认压缩版：内存峰值 3211MB（不撞线），但**渲染阶段（rendering chunks...）thrash 卡死**（对象图贴 4G 线 + cgroup 共享配额被挤压 → 渲染 40min+ 不写盘），随后被沙箱周期重启或进程保护杀掉
+3. `NODE_OPTIONS=--max-old-space-size=2048` 无效：峰值内存来自 **esbuild worker（Go 进程）**，不受 node 堆限制；仍撞线
+4. `taskset -c 0 nice -n 19`（单核+最低优先级）：无本质改善
+5. 额外坑：`pnpm run mobile:sync:android` 链内 `delete-sourcemaps` 脚本引用 `./.erb/scripts/delete-source-maps-runner.js`（**该文件不存在**，实际文件是 `delete-source-maps.js`）→ `build:renderer && delete-sourcemaps && cap sync` 的 `&&` 短路，**cap sync 不执行**——但**产物已完整生成**，只是没同步到 android assets
+
+**成功模式（第 7 次，11 分钟完成）**：
+- 前提：等待沙箱**完全空闲**（`load <1`、可用内存 ≥3.5G）后再启动；沙箱周期重启后立即启动有最大窗口
+- 关键改动：**临时移除 `electron.vite.config.ts` 中 renderer 的 `manualChunks`**（改为 `manualChunks: undefined`）——消除 `Circular chunk: vendor-ui -> vendor-ai -> vendor-ui` 渲染死循环/卡死，渲染阶段飞速完成；**构建成功后立即还原配置**
+- 使用默认压缩（不开 NO_MINIFY）
+- 产物实际输出目录：**`release/app/dist/renderer/`**（`outDir: isProduction ? 'release/app/dist/renderer'`，不是 `out/renderer`！）
+- 链中断后手动补：把 `release/app/dist/renderer/*` 整体作为 `assets/public/*` 重打包（Python 字节级复制脚本）+ zipalign + v48 签名 + 六查
+
+**六查第 6 项的精确写法（防误报）**：`unzip -p <apk> "assets/public/js/index.*.js"` 通配符可能匹配到**非主 bundle**（如 `index.6OzrIVh1.js` 366B 小 chunk），断言会误报失败/通过。正确做法：先读 `assets/public/index.html` 的 `src="./js/index.XXX.js"` 取**精确主 bundle 名**，再对其断言 target。
+
+**教训**：① 4GiB cgroup 下 NO_MINIFY 必死，压缩版+低峰+临时去 manualChunks 是可行路径；② 产物在 `release/app/dist/renderer`；③ `delete-sourcemaps` 脚本缺失导致链中断属常态，手动同步产物即可；④ 六查 target 断言必须用 index.html 引用的精确主 bundle 名。
+
 ---
 
 ## 三、固化纪律（铁律）

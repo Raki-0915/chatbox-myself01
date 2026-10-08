@@ -8,7 +8,7 @@
 ## 作废版本记录（2026-10-08 · 用户裁决）
 
 > **V17 全线作废**：`fork版V17_202610071400` / `fork版V17.1_202610071445` / `fork版V17.2_202610071635` / `fork版V17.3_202610071845` / `fork版V17.4_202610072250`（含备份扩展功能线）因构建未注入 `CHATBOX_BUILD_TARGET=mobile_app`（产物 `"unknown"` 走 WebPlatform）全部作废，交付目录中已重命名加 `_已作废` 后缀（文件保留供取证，不再视为可交付版本）。
-> **当前有效移动端版本**：基底 `fork版_202610061721.apk`（`CHATBOX_BUILD_TARGET="mobile_app"` ✅，用户长期使用且数据正常）与 `fork版V16_202610071248.apk`（同为 `"mobile_app"` ✅）。新版本必须以**正确构建命令**（`pnpm run mobile:sync:android`）重建，交付前六查验证产物 target。
+> **当前有效移动端版本**：基底 `fork版_202610061721.apk`（`CHATBOX_BUILD_TARGET="mobile_app"` ✅，用户长期使用且数据正常）、`fork版V16_202610071248.apk`（同为 `"mobile_app"` ✅）、`fork版_重做备份扩展_202610081502.apk`（**当前最新**：基底 + 备份扩展 + 判重v2.2 + 强制中文，正确 target，10-08 重建交付，用户验收通过）。新版本必须以**正确构建命令**（`pnpm run mobile:sync:android`）重建，交付前六查验证产物 target。
 
 ## 构建与交付纪律（V16 复盘固化 · 接手必读）
 
@@ -19,9 +19,10 @@
 2. **重打包铁律**：非网页条目从基底 APK **字节级原样复制**（不重写）；`lib/*.so` 与 `assets/dexopt/*` 必须保持 STORED（压缩即真机安装失败）；**网页产物路径是 `assets/public/`**（Android 原生 assets，不是 `public/`）——重打包必须剔除基底的 `assets/public/*` 并把新产物写入 `assets/public/`，交付前验证 APK 内 `assets/public/js/index.*.js` 含新功能特征串
 3. **密钥唯一**：只用 `v48-keys/签名密钥/chatbox-mod.keystore`（指纹 aa46319b85），用前 `keytool` 验指纹
 4. **移动端构建命令（V17.3 新增铁律）**：交付 Android APK 的 renderer 构建**必须**用 `pnpm run mobile:sync:android`（其内部注入 `CHATBOX_BUILD_TARGET=mobile_app CHATBOX_BUILD_PLATFORM=android`）；**禁止裸 `electron-vite build` / 裸 `npx cross-env ... electron-vite build` 交付移动端**（不注入 target 时产物 `CHATBOX_BUILD_TARGET="unknown"`，运行时走 WebPlatform→localStorage，读不到 SQLite 旧数据=用户数据「消失」，且平台判定错乱导致移动端应隐藏的入口错误显示）
-5. **交付前六查**：`unzip -t`（zip 完整）/ `zipalign -c -p 4`（对齐）/ `apksigner verify`（签名）/ `aapt dump badging`（manifest 可解析）/ `.so` 存储方式必须 Stored / **`unzip -p <apk> assets/public/js/index.*.js | grep -c 'CHATBOX_BUILD_TARGET="mobile_app"'` 必须 ≥1**（构建 target 正确注入，防数据层错位）
+5. **交付前六查**：`unzip -t`（zip 完整）/ `zipalign -c -p 4`（对齐）/ `apksigner verify`（签名）/ `aapt dump badging`（manifest 可解析）/ `.so` 存储方式必须 Stored / **target 断言必须 ≥1**：先读 `assets/public/index.html` 的 `src="./js/index.XXX.js"` 取**精确主 bundle 名**再 `unzip -p <apk> assets/public/js/index.XXX.js | grep -c 'CHATBOX_BUILD_TARGET="mobile_app"'`——**禁止用 `index.*.js` 通配符**（会匹配到 366B 小 chunk 造成误报）（V17.3 新增，防数据层错位）
 6. **体积默认压缩**：`CHATBOX_NO_MINIFY` 仅作应急，交付后补压缩版（否则慢网下载易损坏）
 7. **界面语言硬约束**：本项目界面**必须简体中文**（用户明确要求，不接受英文/跟随系统）。启动强制 `i18n.changeLanguage('zh-Hans')`，改动涉及语言/设置初始化时不得回退为 `settings.language`
+8. **沙箱 4GiB 内存构建（10-08 新增铁律）**：cgroup `memory.max=4GiB` + 容器周期重启（20-66min）下：**禁用 `CHATBOX_NO_MINIFY`**（峰值 3968MB 必撞线）；**临时移除 renderer 的 `manualChunks`**（消除 Circular chunk 渲染卡死，构建后还原）并**等沙箱空闲（load<1、可用≥3.5G）再启动**，压缩版约 11 分钟完成；产物在 **`release/app/dist/renderer/`**（不是 `out/renderer`）；`mobile:sync:android` 链内 `delete-sourcemaps` 引用不存在的 `delete-source-maps-runner.js` → 链在 cap sync 前中断属常态，**手动把 dist 产物同步为 `assets/public/*` 再重打包**
 
 ---
 
