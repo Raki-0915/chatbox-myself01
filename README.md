@@ -5,6 +5,11 @@
 
 ---
 
+## 作废版本记录（2026-10-08 · 用户裁决）
+
+> **V17 全线作废**：`fork版V17_202610071400` / `fork版V17.1_202610071445` / `fork版V17.2_202610071635` / `fork版V17.3_202610071845` / `fork版V17.4_202610072250`（含备份扩展功能线）因构建未注入 `CHATBOX_BUILD_TARGET=mobile_app`（产物 `"unknown"` 走 WebPlatform）全部作废，交付目录中已重命名加 `_已作废` 后缀（文件保留供取证，不再视为可交付版本）。
+> **当前有效移动端版本**：基底 `fork版_202610061721.apk`（`CHATBOX_BUILD_TARGET="mobile_app"` ✅，用户长期使用且数据正常）与 `fork版V16_202610071248.apk`（同为 `"mobile_app"` ✅）。新版本必须以**正确构建命令**（`pnpm run mobile:sync:android`）重建，交付前六查验证产物 target。
+
 ## 构建与交付纪律（V16 复盘固化 · 接手必读）
 
 > 2026-10-07 V16 增量交付暴露 5 个问题（双构建并发、删运行中产物、密钥用错、native 库被压缩、zip 结构差异）；V17 又暴露 2 个（重打包路径写错 `public/` 而非 `assets/public/` 导致新代码不生效；强制中文逻辑未延续导致界面变英文）；V17.3 再暴露 1 个（**移动端构建未注入 `CHATBOX_BUILD_TARGET=mobile_app`**，产物以 `"unknown"` 平台运行 → WebPlatform 读 localStorage，SQLite 旧数据全部读不到「数据消失」+ 移动端应隐藏的 Keyboard Shortcuts 入口错误显示）。完整复盘见 `docs/technical/build-delivery-playbook.md`。以下为铁律：
