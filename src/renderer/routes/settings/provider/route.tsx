@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { AddProviderModal } from '@/components/settings/provider/AddProviderModal'
 import { ImportProviderModal } from '@/components/settings/provider/ImportProviderModal'
+import { ImportProviderTextModal } from '@/components/settings/provider/ImportProviderTextModal'
 import { ProviderList } from '@/components/settings/provider/ProviderList'
 import ProviderSpotlight, { providerSpotlight } from '@/components/settings/provider/ProviderSpotlight'
 import { useProviderImport } from '@/hooks/useProviderImport'
@@ -86,8 +87,15 @@ export function RouteComponent() {
     existingProvider,
     checkExistingProvider,
     handleClipboardImport,
+    handleTextImport,
     handleCancelImport,
   } = useProviderImport(providers)
+
+  // [Chatbox Mod] 移动端文本导入弹窗状态
+  const [textImportModalOpened, setTextImportModalOpened] = useState(false)
+  const handleOpenTextImport = useCallback(() => {
+    setTextImportModalOpened(true)
+  }, [])
 
   const searchParams = Route.useSearch()
 
@@ -147,7 +155,11 @@ export function RouteComponent() {
   return (
     <Flex h="100%" w="100%">
       {(!isSmallScreen || routerState.location.pathname === '/settings/provider') && (
-        <ProviderList providers={providers} onAddProvider={handleOpenSpotlight} />
+        <ProviderList
+          providers={providers}
+          onAddProvider={handleOpenSpotlight}
+          onImportProvider={handleOpenTextImport}
+        />
       )}
       {!(isSmallScreen && routerState.location.pathname === '/settings/provider') && (
         <Box flex="1 1 75%" p="md" className="overflow-auto">
@@ -156,6 +168,12 @@ export function RouteComponent() {
       )}
 
       <AddProviderModal opened={newProviderModalOpened} onClose={() => setNewProviderModalOpened(false)} />
+
+      <ImportProviderTextModal
+        opened={textImportModalOpened}
+        onClose={() => setTextImportModalOpened(false)}
+        onImport={handleTextImport}
+      />
 
       <ImportProviderModal
         opened={importModalOpened}

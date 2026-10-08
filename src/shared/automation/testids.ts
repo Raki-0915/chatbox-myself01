@@ -139,6 +139,7 @@ export const TestId = {
     /** Hosts AutomationAdjacentAttr.providerId. */
     providerItem: 'settings-provider-item',
     addProvider: 'settings-add-provider',
+    importProvider: 'settings-import-provider',
     addProviderName: 'settings-add-provider-name',
     addProviderApiMode: 'settings-add-provider-api-mode',
     addProviderSubmit: 'settings-add-provider-submit',

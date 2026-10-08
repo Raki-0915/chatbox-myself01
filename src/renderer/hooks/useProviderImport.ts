@@ -31,18 +31,10 @@ export function useProviderImport(providers: ProviderInfo[]) {
       setImportError(null)
 
       const text = await navigator.clipboard.readText()
-      const config = parseProviderFromJson(text)
-
-      if (!config) {
-        setImportError(t('Invalid provider configuration format'))
-        return
+      const error = handleTextImport(text)
+      if (error) {
+        setImportError(error)
       }
-
-      // Check if provider already exists
-      checkExistingProvider(config.id)
-
-      setImportedConfig(config)
-      setImportModalOpened(true)
     } catch (err) {
       console.error('Clipboard import failed:', err)
       setImportError(t('Failed to read from clipboard'))
@@ -50,6 +42,31 @@ export function useProviderImport(providers: ProviderInfo[]) {
       setIsImporting(false)
     }
   }
+
+  // [Chatbox Mod] 移动端入口：粘贴 JSON 文本导入（不走剪贴板，安卓 WebView readText 不可靠）
+  // 返回 null=成功（已打开预览弹窗），非 null=错误信息（由调用方显示）
+  const handleTextImport = useCallback(
+    (text: string): string | null => {
+      try {
+        const config = parseProviderFromJson(text)
+
+        if (!config) {
+          return t('Invalid provider configuration format')
+        }
+
+        // Check if provider already exists
+        checkExistingProvider(config.id)
+
+        setImportedConfig(config)
+        setImportModalOpened(true)
+        return null
+      } catch (err) {
+        console.error('Text import failed:', err)
+        return t('Invalid provider configuration format')
+      }
+    },
+    [t, checkExistingProvider]
+  )
 
   const handleCancelImport = () => {
     setImportModalOpened(false)
@@ -69,6 +86,7 @@ export function useProviderImport(providers: ProviderInfo[]) {
     existingProvider,
     checkExistingProvider,
     handleClipboardImport,
+    handleTextImport,
     handleCancelImport,
   }
 }

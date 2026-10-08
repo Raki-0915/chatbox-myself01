@@ -1,7 +1,7 @@
 import { Button, Flex, Image, Indicator, ScrollArea, Stack, Text } from '@mantine/core'
 import { AutomationAdjacentAttr, TestId } from '@shared/automation/testids'
 import { ModelProviderEnum, type ProviderBaseInfo } from '@shared/types'
-import { IconChevronRight, IconPlus } from '@tabler/icons-react'
+import { IconChevronRight, IconFileImport, IconPlus } from '@tabler/icons-react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import clsx from 'clsx'
 import { useMemo } from 'react'
@@ -16,9 +16,11 @@ import { FEATURED_PROVIDER_IDS, ProviderIconImage } from './providerIcons'
 interface ProviderListProps {
   providers: ProviderBaseInfo[]
   onAddProvider: () => void
+  // [Chatbox Mod] 移动端提供商 JSON 导入入口
+  onImportProvider: () => void
 }
 
-export function ProviderList({ providers, onAddProvider }: ProviderListProps) {
+export function ProviderList({ providers, onAddProvider, onImportProvider }: ProviderListProps) {
   const { t } = useTranslation()
   const isSmallScreen = useIsSmallScreen()
   const routerState = useRouterState()
@@ -128,6 +130,15 @@ export function ProviderList({ providers, onAddProvider }: ProviderListProps) {
           onClick={onAddProvider}
         >
           {t('Add')}
+        </Button>
+        {/* [Chatbox Mod] 移动端提供商 JSON 导入入口（桌面走剪贴板，移动端走粘贴 JSON） */}
+        <Button
+          data-testid={TestId.settings.importProvider}
+          variant="subtle"
+          leftSection={<ScalableIcon icon={IconFileImport} />}
+          onClick={onImportProvider}
+        >
+          {t('Import Provider Config')}
         </Button>
       </Stack>
     </Stack>
